@@ -44,7 +44,8 @@ bool SilentStepperDriverWrapper::initialize()
     decceleration_ = node_->declare_parameter<int>("decceleration", 1000);
     steps_per_revolution_ = node_->declare_parameter<int>("steps_per_revolution", 200);
     mirror_direction_ = node_->declare_parameter<bool>("mirror_direction", false);
-    max_step_vel_ = node_->declare_parameter<int>("max_step_vel", 1000);
+    gear_ratio_ = node_->declare_parameter<int>("gear_ratio", 1);
+	max_step_vel_ = node_->declare_parameter<int>("max_step_vel", 1000);
     wheel_name_ = node_->declare_parameter<std::string>("wheel_name", "wheel");
     hw_simulation_ = node_->declare_parameter<bool>("hw_simulation", false);
 
@@ -90,7 +91,8 @@ bool SilentStepperDriverWrapper::initialize()
     RCLCPP_INFO(node_->get_logger(), "decceleration : %d", decceleration_);
     RCLCPP_INFO(node_->get_logger(), "steps_per_revolution : %d", steps_per_revolution_);
     RCLCPP_INFO(node_->get_logger(), "mirror_direction : %s", BoolToString(mirror_direction_));
-    RCLCPP_INFO(node_->get_logger(), "max_step_vel : %d", max_step_vel_);
+    RCLCPP_INFO(node_->get_logger(), "gear_ratio : %d", gear_ratio_);
+	RCLCPP_INFO(node_->get_logger(), "max_step_vel : %d", max_step_vel_);
     RCLCPP_INFO(node_->get_logger(), "wheel_name : %s", wheel_name_.c_str());
     RCLCPP_INFO(node_->get_logger(), "hw_simulation : %s", BoolToString(hw_simulation_));
 
@@ -114,6 +116,7 @@ bool SilentStepperDriverWrapper::initialize()
         rclcpp::Parameter("decceleration", decceleration_),
         rclcpp::Parameter("steps_per_revolution", steps_per_revolution_),
         rclcpp::Parameter("mirror_direction", mirror_direction_),
+		rclcpp::Parameter("gear_ratio", gear_ratio_),
         rclcpp::Parameter("max_step_vel", max_step_vel_),
         rclcpp::Parameter("wheel_name", wheel_name_),
         rclcpp::Parameter("hw_simulation", hw_simulation_),
@@ -178,7 +181,7 @@ void SilentStepperDriverWrapper::drive_callback(const cmeresearch_msgs::msg::Tin
   	if (hw_simulation_) {
 
 	  // rad/s --> revolutions/s
-      double revolutions_per_sec = cmd_vel / (2 * M_PI);
+      double revolutions_per_sec = (cmd_vel * gear_ratio_) / (2 * M_PI);
   	  uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_ * step_resolution_);
       RCLCPP_INFO(node_->get_logger(), "Simulation mode: cmd_vel in steps/s= %d", steps_per_sec);
     }
