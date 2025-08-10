@@ -68,6 +68,7 @@ bool SilentStepperDriverWrapper::initialize()
     decceleration_ = node_->get_parameter("decceleration").as_int();
     steps_per_revolution_ = node_->get_parameter("steps_per_revolution").as_int();
     mirror_direction_ = node_->get_parameter("mirror_direction").as_bool();
+    gear_ratio_ = node_->get_parameter("gear_ratio").as_int();
     max_step_vel_ = node_->get_parameter("max_step_vel").as_int();
     wheel_name_ = node_->get_parameter("wheel_name").as_string();
     hw_simulation_ = node_->get_parameter("hw_simulation").as_bool();
@@ -153,6 +154,7 @@ bool SilentStepperDriverWrapper::initialize()
             acceleration_,
             decceleration_,
             steps_per_revolution_,
+            gear_ratio_,
             max_step_vel_,
             standstill_current_,
             motor_run_current_,

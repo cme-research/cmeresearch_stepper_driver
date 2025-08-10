@@ -43,6 +43,7 @@ class StepperDriver {
           int acceleration,
           int decceleration,
           int steps_per_revolution,
+          int gear_ratio,
           int max_step_vel,
           int standstill_current = 200,
           int motor_run_current = 800,
@@ -83,6 +84,7 @@ class StepperDriver {
         // parameters set by launch file
         int step_resolution_;
         int steps_per_revolution_;
+        int gear_ratio_;
         int max_step_vel_;
         int acceleration_;
         int decceleration_;

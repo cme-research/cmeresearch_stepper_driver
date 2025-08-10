@@ -33,6 +33,7 @@ StepperDriver::StepperDriver(
   int acceleration,
   int decceleration,
   int step_per_revolution,
+  int gear_ratio,
   int max_step_vel,
   int standstill_current,
   int motor_run_current,
@@ -52,6 +53,7 @@ StepperDriver::StepperDriver(
   acceleration_ = acceleration;
   decceleration_ = decceleration;
   steps_per_revolution_ = step_per_revolution;
+  gear_ratio_ = gear_ratio;
   max_step_vel_ = max_step_vel;
   current_velocity_ = 0;
   current_position_ = 0;
