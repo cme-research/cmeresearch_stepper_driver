@@ -209,7 +209,7 @@ void StepperDriver::cb_all_data(uint16_t current_velocity,
 {
   StepperDriver *stepperDriver = (StepperDriver *)user_data;
 
-  fprintf(stderr, "StepperDriver::current_velocity %d\n", current_velocity);
+  //fprintf(stderr, "StepperDriver::current_velocity %d\n", current_velocity);
   stepperDriver->current_velocity_ = current_velocity;
   stepperDriver->current_position_ = current_position;
   stepperDriver->remaining_steps_ = remaining_steps;
@@ -259,10 +259,10 @@ void StepperDriver::stop() {
 
 
 void StepperDriver::drive_forward() {
-    fprintf(stderr, "drive forward\n");
+    //fprintf(stderr, "drive forward\n");
 	int e_code = silent_stepper_v2_get_enabled(&brickletStepperV2_, &ret_enabled_);
-	fprintf(stderr, "get_enabled call success??: %d\n", e_code);
-	fprintf(stderr, "enabled: %d\n", ret_enabled_);
+	//fprintf(stderr, "get_enabled call success??: %d\n", e_code);
+	//fprintf(stderr, "enabled: %d\n", ret_enabled_);
 	if (bricklet_is_configured_) {
 		if (stepper_enabled_ == false) {
   			this->stepperEnabled();
@@ -278,7 +278,7 @@ void StepperDriver::drive_forward() {
 
 void StepperDriver::drive_backward() {
   if (bricklet_is_configured_) {
-    fprintf(stderr, "drive backward\n");
+    //fprintf(stderr, "drive backward\n");
     if (stepper_enabled_ == false) {
       this->stepperEnabled();
   	}
@@ -307,6 +307,6 @@ void StepperDriver::set_velocity(double cmd_vel) {
   // cmd_vel in rad/s to steps/s
   double revolutions_per_sec = (cmd_vel * gear_ratio_) / (2 * M_PI);
   uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_);
-  fprintf(stderr, "set_velocity in steps per second %d\n", steps_per_sec);
+  //fprintf(stderr, "set_velocity in steps per second %d\n", steps_per_sec);
   silent_stepper_v2_set_max_velocity(&brickletStepperV2_, steps_per_sec);
 }
