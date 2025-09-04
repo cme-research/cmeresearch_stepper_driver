@@ -72,7 +72,7 @@ private:
     int step_resolution_;
     bool interpolation_;
     int acceleration_;
-    int decceleration_;
+    int deceleration_;
     int steps_per_revolution_;
     bool mirror_direction_;
     int gear_ratio_;

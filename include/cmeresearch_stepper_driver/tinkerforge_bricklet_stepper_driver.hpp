@@ -41,7 +41,7 @@ class StepperDriver {
           int step_resolution,
           bool interpolation,
           int acceleration,
-          int decceleration,
+          int deceleration,
           int steps_per_revolution,
           int gear_ratio,
           int max_step_vel,
@@ -87,7 +87,7 @@ class StepperDriver {
         int gear_ratio_;
         int max_step_vel_;
         int acceleration_;
-        int decceleration_;
+        int deceleration_;
         int wheel_name_;
         std::string brick_position_;
         int bricklet_port_;
