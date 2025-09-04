@@ -157,7 +157,7 @@ void StepperDriver::cb_enumerate(const char *uid, const char *connected_uid,
   			fprintf(stderr, "create.\n");
 
   	  		silent_stepper_v2_create(&(stepperDriver->brickletStepperV2_), stepperDriver->hw_bricklet_uid_.c_str(), &(stepperDriver->ipcon_));
-	  		silent_stepper_v2_set_step_configuration(&(stepperDriver->brickletStepperV2_), stepperDriver->step_resolution_, true);
+	  		silent_stepper_v2_set_step_configuration(&(stepperDriver->brickletStepperV2_), SILENT_STEPPER_V2_STEP_RESOLUTION_8, true);
             fprintf(stderr, "bricklet step configuration set.\n");
         	silent_stepper_v2_set_motor_current(&(stepperDriver->brickletStepperV2_), stepperDriver->motor_run_current_);
             silent_stepper_v2_set_max_velocity(&(stepperDriver->brickletStepperV2_), stepperDriver->max_step_vel_);
