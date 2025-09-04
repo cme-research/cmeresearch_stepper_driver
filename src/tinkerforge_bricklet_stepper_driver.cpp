@@ -51,7 +51,7 @@ StepperDriver::StepperDriver(
   step_resolution_ = step_resolution;
   interpolation_ = interpolation;
   acceleration_ = acceleration;
-  decceleration_ = decceleration;
+  deceleration_ = deceleration;
   steps_per_revolution_ = step_per_revolution;
   gear_ratio_ = gear_ratio;
   max_step_vel_ = max_step_vel;
@@ -161,7 +161,7 @@ void StepperDriver::cb_enumerate(const char *uid, const char *connected_uid,
             fprintf(stderr, "bricklet step configuration set.\n");
         	silent_stepper_v2_set_motor_current(&(stepperDriver->brickletStepperV2_), stepperDriver->motor_run_current_);
             silent_stepper_v2_set_max_velocity(&(stepperDriver->brickletStepperV2_), stepperDriver->max_step_vel_);
-            silent_stepper_v2_set_speed_ramping(&(stepperDriver->brickletStepperV2_), stepperDriver->acceleration_, stepperDriver->decceleration_);
+            silent_stepper_v2_set_speed_ramping(&(stepperDriver->brickletStepperV2_), stepperDriver->acceleration_, stepperDriver->deceleration_);
             fprintf(stderr, "bricklet speed ramping set.\n");
             silent_stepper_v2_set_basic_configuration(&(stepperDriver->brickletStepperV2_),
                                                     stepperDriver->standstill_current_,

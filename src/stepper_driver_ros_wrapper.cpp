@@ -41,7 +41,7 @@ bool SilentStepperDriverWrapper::initialize()
     step_resolution_ = node_->declare_parameter<int>("step_resolution", 8);
     interpolation_ = node_->declare_parameter<bool>("interpolation", true);
     acceleration_ = node_->declare_parameter<int>("acceleration", 1000);
-    decceleration_ = node_->declare_parameter<int>("decceleration", 1000);
+    deceleration_ = node_->declare_parameter<int>("deceleration", 1000);
     steps_per_revolution_ = node_->declare_parameter<int>("steps_per_revolution", 200);
     mirror_direction_ = node_->declare_parameter<bool>("mirror_direction", false);
     gear_ratio_ = node_->declare_parameter<int>("gear_ratio", 1);
@@ -65,7 +65,7 @@ bool SilentStepperDriverWrapper::initialize()
     step_resolution_ = node_->get_parameter("step_resolution").as_int();
     interpolation_ = node_->get_parameter("interpolation").as_bool();
     acceleration_ = node_->get_parameter("acceleration").as_int();
-    decceleration_ = node_->get_parameter("decceleration").as_int();
+    deceleration_ = node_->get_parameter("deceleration").as_int();
     steps_per_revolution_ = node_->get_parameter("steps_per_revolution").as_int();
     mirror_direction_ = node_->get_parameter("mirror_direction").as_bool();
     gear_ratio_ = node_->get_parameter("gear_ratio").as_int();
@@ -89,7 +89,7 @@ bool SilentStepperDriverWrapper::initialize()
     RCLCPP_INFO(node_->get_logger(), "step_resolution : %d", step_resolution_);
     RCLCPP_INFO(node_->get_logger(), "interpolation : %s", BoolToString(interpolation_));
     RCLCPP_INFO(node_->get_logger(), "acceleration : %d", acceleration_);
-    RCLCPP_INFO(node_->get_logger(), "decceleration : %d", decceleration_);
+    RCLCPP_INFO(node_->get_logger(), "deceleration : %d", deceleration_);
     RCLCPP_INFO(node_->get_logger(), "steps_per_revolution : %d", steps_per_revolution_);
     RCLCPP_INFO(node_->get_logger(), "mirror_direction : %s", BoolToString(mirror_direction_));
     RCLCPP_INFO(node_->get_logger(), "gear_ratio : %d", gear_ratio_);
@@ -114,7 +114,7 @@ bool SilentStepperDriverWrapper::initialize()
         rclcpp::Parameter("step_resolution", step_resolution_),
         rclcpp::Parameter("interpolation", interpolation_),
         rclcpp::Parameter("acceleration", acceleration_),
-        rclcpp::Parameter("decceleration", decceleration_),
+        rclcpp::Parameter("deceleration", deceleration_),
         rclcpp::Parameter("steps_per_revolution", steps_per_revolution_),
         rclcpp::Parameter("mirror_direction", mirror_direction_),
 		rclcpp::Parameter("gear_ratio", gear_ratio_),
@@ -152,7 +152,7 @@ bool SilentStepperDriverWrapper::initialize()
             step_resolution_,
             interpolation_,
             acceleration_,
-            decceleration_,
+            deceleration_,
             steps_per_revolution_,
             gear_ratio_,
             max_step_vel_,
