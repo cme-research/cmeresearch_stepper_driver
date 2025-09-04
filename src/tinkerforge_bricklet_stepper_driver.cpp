@@ -31,7 +31,7 @@ StepperDriver::StepperDriver(
   int step_resolution,
   bool interpolation,
   int acceleration,
-  int decceleration,
+  int deceleration,
   int step_per_revolution,
   int gear_ratio,
   int max_step_vel,
