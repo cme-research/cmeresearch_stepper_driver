@@ -181,7 +181,7 @@ void SilentStepperDriverWrapper::drive_callback(const cmeresearch_msgs::msg::Tin
   //TODO: find out if wheel should go forward or backward!
 	  // rad/s --> revolutions/s
     double revolutions_per_sec = (msg->velocity * gear_ratio_) / (2 * M_PI);
-  	uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_ * step_resolution_);
+  	double steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_ * step_resolution_);
 
   	if (hw_simulation_) {
     	RCLCPP_INFO(node_->get_logger(), "Simulation mode: cmd_vel in steps/s= %d", steps_per_sec);
