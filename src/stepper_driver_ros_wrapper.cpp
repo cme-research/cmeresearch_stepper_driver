@@ -179,26 +179,25 @@ void SilentStepperDriverWrapper::drive_callback(const cmeresearch_msgs::msg::Tin
   //RCLCPP_INFO(node_->get_logger(), "With values : %f, %f", msg->interface_values[0], msg->values[1]);
   //TODO: We need to know which drivers index to choose (left wheel or right wheel)
   //TODO: find out if wheel should go forward or backward!
-  	double cmd_vel = msg->velocity;
-  	if (hw_simulation_) {
-
 	  // rad/s --> revolutions/s
-      double revolutions_per_sec = (cmd_vel * gear_ratio_) / (2 * M_PI);
-  	  uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_ * step_resolution_);
-      RCLCPP_INFO(node_->get_logger(), "Simulation mode: cmd_vel in steps/s= %d", steps_per_sec);
+    double revolutions_per_sec = (msg->velocity * gear_ratio_) / (2 * M_PI);
+  	uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_ * step_resolution_);
+
+  	if (hw_simulation_) {
+    	RCLCPP_INFO(node_->get_logger(), "Simulation mode: cmd_vel in steps/s= %d", steps_per_sec);
     }
 	else {
     	if (mirror_direction_) {
-      		cmd_vel *= -1;
+      		steps_per_sec *= -1;
     	}
 
-		if (cmd_vel >= 0) {
+		if (steps_per_sec >= 0) {
   			stepper_driver_->drive_forward();
-        	stepper_driver_->set_velocity(cmd_vel);
+        	stepper_driver_->set_velocity(steps_per_sec);
 		}
-		else if (cmd_vel < 0) {
+		else if (steps_per_sec < 0) {
   			stepper_driver_->drive_backward();
-        	stepper_driver_->set_velocity(abs(cmd_vel));
+        	stepper_driver_->set_velocity(abs(steps_per_sec));
 		}
     }
 }
