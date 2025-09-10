@@ -306,7 +306,7 @@ void StepperDriver::set_velocity(double cmd_vel) {
 
   // cmd_vel in rad/s to steps/s
   double revolutions_per_sec = (cmd_vel) / (2 * M_PI);
-  uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_);
+  uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_ * step_resolution_);
   fprintf(stderr, "set_velocity in steps per second %d\n", steps_per_sec);
   silent_stepper_v2_set_max_velocity(&brickletStepperV2_, steps_per_sec);
 }
