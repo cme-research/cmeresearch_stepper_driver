@@ -266,6 +266,7 @@ void StepperDriver::stepperEnabled() {
 }
 
 void StepperDriver::stepperDisabled() {
+	fprintf(stderr, "stepperDisabled\n");
 	silent_stepper_v2_set_enabled(&brickletStepperV2_, false);
     stepper_enabled_ = false;
 }
@@ -282,6 +283,7 @@ void StepperDriver::drive_forward() {
 	//fprintf(stderr, "enabled: %d\n", ret_enabled_);
 	if (bricklet_is_configured_) {
 		if (stepper_enabled_ == false) {
+			this->stepperDisabled();
   			this->stepperEnabled();
 		}
         else if (reset_after_under_voltage_triggered_) {
@@ -302,7 +304,8 @@ void StepperDriver::drive_backward() {
   if (bricklet_is_configured_) {
     //fprintf(stderr, "drive backward\n");
     if (stepper_enabled_ == false) {
-      this->stepperEnabled();
+		this->stepperDisabled();
+      	this->stepperEnabled();
   	}
     else if (reset_after_under_voltage_triggered_) {
       reset_after_under_voltage_triggered_ = false;
