@@ -61,6 +61,8 @@ StepperDriver::StepperDriver(
   input_voltage_ = 0;
   remaining_steps_ = 0;
   stepper_enabled_ = false;
+  under_voltage_triggered_ = false;
+  reset_after_under_voltage_triggered_ = false;
 
   // Initialize the parameters that were previously hard-coded
   standstill_current_ = standstill_current;
@@ -214,6 +216,17 @@ void StepperDriver::cb_all_data(uint16_t current_velocity,
   stepperDriver->current_position_ = current_position;
   stepperDriver->remaining_steps_ = remaining_steps;
   stepperDriver->input_voltage_ = input_voltage;
+  if (int(input_voltage) < 17) {
+    under_voltage_triggered_ = true;
+  }
+
+  if (under_voltage_triggered_) {
+    if (int(input_voltage) > 17) {
+    under_voltage_triggered_ = false;
+    reset_under_voltage_triggered_ = true;
+    }
+  }
+
   stepperDriver->current_consumption_ = current_consumption;
 
 }
@@ -266,6 +279,10 @@ void StepperDriver::drive_forward() {
 	if (bricklet_is_configured_) {
 		if (stepper_enabled_ == false) {
   			this->stepperEnabled();
+		}
+        else if (reset_under_voltage_triggered_) {
+          reset_under_voltage_triggered_ = false;
+          this->stepperEnabled();
 		}
 
 

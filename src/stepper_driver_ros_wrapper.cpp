@@ -177,8 +177,6 @@ bool SilentStepperDriverWrapper::initialize()
 
 void SilentStepperDriverWrapper::drive_callback(const cmeresearch_msgs::msg::TinkerStepperCommand::SharedPtr msg) {
   //RCLCPP_INFO(node_->get_logger(), "With values : %f, %f", msg->interface_values[0], msg->values[1]);
-  //TODO: We need to know which drivers index to choose (left wheel or right wheel)
-  //TODO: find out if wheel should go forward or backward!
   double cmd_vel = msg->velocity;
 
   	if (hw_simulation_) {
