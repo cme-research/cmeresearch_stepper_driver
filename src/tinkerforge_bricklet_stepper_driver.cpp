@@ -218,12 +218,14 @@ void StepperDriver::cb_all_data(uint16_t current_velocity,
   stepperDriver->input_voltage_ = input_voltage;
   if (int(input_voltage) < 17) {
     stepperDriver->under_voltage_triggered_ = true;
+    fprintf(stderr, "StepperDriver::cb_all_data - under_voltage triggered\n");
   }
 
   if (stepperDriver->under_voltage_triggered_) {
     if (int(input_voltage) > 17) {
     stepperDriver->under_voltage_triggered_ = false;
     stepperDriver->reset_after_under_voltage_triggered_ = true;
+	fprintf(stderr, "StepperDriver::cb_all_data - reset_after_under_voltage_triggered triggered\n");
     }
   }
 
