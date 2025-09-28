@@ -144,6 +144,7 @@ class StepperDriver {
         int state_previous_;
     	void shutdownStepper();
 		void stepperEnabled();
+		void stepperDisabled();
 
 
         static void cb_enumerate(const char *uid, const char *connected_uid,
