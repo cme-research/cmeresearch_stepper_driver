@@ -95,6 +95,8 @@ class StepperDriver {
         bool stepper_enabled_;
         bool interpolation_;
         bool bricklet_is_configured_;
+        bool under_voltage_triggerd_;
+        bool reset_under_voltage_triggered_;
         // parameters for motor (hopefully they don't need to be parameters to be changed from outside
         int standstill_current_;
         int motor_run_current_;
