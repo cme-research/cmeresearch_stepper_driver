@@ -223,7 +223,7 @@ void StepperDriver::cb_all_data(uint16_t current_velocity,
   if (under_voltage_triggered_) {
     if (int(input_voltage) > 17) {
     under_voltage_triggered_ = false;
-    reset_under_voltage_triggered_ = true;
+    reset_after_under_voltage_triggered_ = true;
     }
   }
 
@@ -280,8 +280,8 @@ void StepperDriver::drive_forward() {
 		if (stepper_enabled_ == false) {
   			this->stepperEnabled();
 		}
-        else if (reset_under_voltage_triggered_) {
-          reset_under_voltage_triggered_ = false;
+        else if (reset_after_under_voltage_triggered_) {
+          reset_after_under_voltage_triggered_ = false;
           this->stepperEnabled();
 		}
 
@@ -299,6 +299,10 @@ void StepperDriver::drive_backward() {
     if (stepper_enabled_ == false) {
       this->stepperEnabled();
   	}
+    else if (reset_after_under_voltage_triggered_) {
+      reset_after_under_voltage_triggered_ = false;
+      this->stepperEnabled();
+	}
   	silent_stepper_v2_drive_backward(&brickletStepperV2_);
   }
 }
