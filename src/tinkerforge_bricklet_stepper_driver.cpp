@@ -190,8 +190,9 @@ void StepperDriver::cb_enumerate(const char *uid, const char *connected_uid,
             silent_stepper_v2_register_callback(&(stepperDriver->brickletStepperV2_),
                                         SILENT_STEPPER_V2_CALLBACK_ALL_DATA,
                                         (void (*) (void)) cb_all_data,
-                                        this);
+                                        stepperDriver);
             stepperDriver->bricklet_is_configured_ = true;
+			silent_stepper_v2_set_enabled(&brickletStepperV2_, true)
     	    fprintf(stderr, "Hardware StepperDriver device created..\n");
 	  	}
         else
