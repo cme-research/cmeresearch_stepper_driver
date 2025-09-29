@@ -216,7 +216,7 @@ void StepperDriver::cb_all_data(uint16_t current_velocity,
 {
   StepperDriver *stepperDriver = (StepperDriver *)user_data;
 
-  fprintf(stderr, "StepperDriver::input_voltage %d\n", input_voltage);
+  //fprintf(stderr, "StepperDriver::input_voltage %d\n", input_voltage);
   stepperDriver->current_velocity_ = current_velocity;
   stepperDriver->current_position_ = current_position;
   stepperDriver->remaining_steps_ = remaining_steps;
@@ -224,7 +224,7 @@ void StepperDriver::cb_all_data(uint16_t current_velocity,
   stepperDriver->current_consumption_ = current_consumption;
   if (int(input_voltage) < 17000) {
     stepperDriver->under_voltage_triggered_ = true;
-    fprintf(stderr, "StepperDriver::cb_all_data - under_voltage triggered\n");
+    //fprintf(stderr, "StepperDriver::cb_all_data - under_voltage triggered\n");
   }
 
   if (stepperDriver->under_voltage_triggered_) {
