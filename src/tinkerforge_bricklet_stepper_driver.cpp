@@ -180,7 +180,7 @@ void StepperDriver::cb_enumerate(const char *uid, const char *connected_uid,
             silent_stepper_v2_register_callback(&(stepperDriver->brickletStepperV2_),
                                         SILENT_STEPPER_V2_CALLBACK_POSITION_REACHED,
                                         (void (*)(void))cb_position_reached,
-                                        &(stepperDriver->brickletStepperV2_));
+                                        stepperDriver);
             fprintf(stderr, "position reached callback registered.\n");
             //silent_stepper_v2_set_enabled(&brickletStepperV2_, true); // Enable motor power
             //silent_stepper_v2_register_callback(&(stepperDriver->brickletStepperV2_),
