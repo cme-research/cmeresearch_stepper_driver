@@ -216,26 +216,24 @@ void StepperDriver::cb_all_data(uint16_t current_velocity,
 {
   StepperDriver *stepperDriver = (StepperDriver *)user_data;
 
-  //fprintf(stderr, "StepperDriver::current_velocity %d\n", current_velocity);
-  stepperDriver->current_velocity_ = current_velocity;
-  stepperDriver->current_position_ = current_position;
-  stepperDriver->remaining_steps_ = remaining_steps;
-  stepperDriver->input_voltage_ = input_voltage;
-  if (int(input_voltage) < 17) {
-    stepperDriver->under_voltage_triggered_ = true;
-    fprintf(stderr, "StepperDriver::cb_all_data - under_voltage triggered\n");
-  }
+  fprintf(stderr, "StepperDriver::input_voltage %d\n", input_voltage);
+  //stepperDriver->current_velocity_ = current_velocity;
+  //stepperDriver->current_position_ = current_position;
+  //stepperDriver->remaining_steps_ = remaining_steps;
+  //stepperDriver->input_voltage_ = input_voltage;
+  //stepperDriver->current_consumption_ = current_consumption;
+  //if (int(input_voltage) < 17) {
+  //  stepperDriver->under_voltage_triggered_ = true;
+  //  fprintf(stderr, "StepperDriver::cb_all_data - under_voltage triggered\n");
+  //}
 
-  if (stepperDriver->under_voltage_triggered_) {
-    if (int(input_voltage) > 17) {
-    stepperDriver->under_voltage_triggered_ = false;
-    stepperDriver->reset_after_under_voltage_triggered_ = true;
-	fprintf(stderr, "StepperDriver::cb_all_data - reset_after_under_voltage_triggered triggered\n");
-    }
-  }
-
-  stepperDriver->current_consumption_ = current_consumption;
-
+  //if (stepperDriver->under_voltage_triggered_) {
+  //  if (int(input_voltage) > 17) {
+  //  stepperDriver->under_voltage_triggered_ = false;
+  //  stepperDriver->reset_after_under_voltage_triggered_ = true;
+  //  fprintf(stderr, "StepperDriver::cb_all_data - reset_after_under_voltage_triggered triggered\n");
+  //  }
+  //}
 }
 
 void StepperDriver::cb_position_reached(int32_t position, void *user_data) {
