@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <string>
 #include <memory>
 #include <vector>
+#include <std_msgs/msg/string.hpp>
 #include "cmeresearch_msgs/msg/tinker_stepper_command.hpp"
 #include "cmeresearch_msgs/msg/tinker_stepper_feedback.hpp"
 #include "cmeresearch_stepper_driver/tinkerforge_bricklet_stepper_driver.hpp"
@@ -60,6 +61,9 @@ private:
 
     //! Publisher object for the "drive_output" topic
     rclcpp::Publisher<cmeresearch_msgs::msg::TinkerStepperFeedback>::SharedPtr stepper_feedback_publisher_;
+
+    //! Publisher object for the "state" topic
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr state_publisher_;
 
     cmeresearch_msgs::msg::TinkerStepperFeedback stepper_feedback_msg_;
 

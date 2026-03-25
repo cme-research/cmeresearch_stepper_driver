@@ -142,6 +142,8 @@ bool SilentStepperDriverWrapper::initialize()
 //    StepperDriver stepper(bricklet_host_, bricklet_port_);
 	stepper_feedback_publisher_ = node_->create_publisher<cmeresearch_msgs::msg::TinkerStepperFeedback>("drive_output", 10);
 
+	state_publisher_ = node_->create_publisher<std_msgs::msg::String>("state", 10);
+
 	sub_drive_cmd_ = node_->create_subscription<cmeresearch_msgs::msg::TinkerStepperCommand>("drive_input", 10, std::bind(&SilentStepperDriverWrapper::drive_callback, this, std::placeholders::_1));
 
 
@@ -211,4 +213,11 @@ void SilentStepperDriverWrapper::timer_callback() {
     stepper_feedback_msg_.current_position = stepper_driver_->get_current_position();
 
     stepper_feedback_publisher_->publish(stepper_feedback_msg_);
+
+    // Publish state when low voltage is detected
+    if (stepper_driver_->get_under_voltage_triggered()) {
+        std_msgs::msg::String state_msg;
+        state_msg.data = "low_voltage";
+        state_publisher_->publish(state_msg);
+    }
 }
