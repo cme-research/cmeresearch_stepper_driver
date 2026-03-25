@@ -194,11 +194,11 @@ void SilentStepperDriverWrapper::drive_callback(const cmeresearch_msgs::msg::Tin
 
 		if (cmd_vel >= 0) {
   			stepper_driver_->drive_forward();
-        	stepper_driver_->set_velocity(cmd_vel);
+        	stepper_driver_->set_velocity(cmd_vel * gear_ratio_);
 		}
 		else if (cmd_vel < 0) {
   			stepper_driver_->drive_backward();
-        	stepper_driver_->set_velocity(abs(cmd_vel));
+        	stepper_driver_->set_velocity(abs(cmd_vel) * gear_ratio_);
 		}
     }
 }
