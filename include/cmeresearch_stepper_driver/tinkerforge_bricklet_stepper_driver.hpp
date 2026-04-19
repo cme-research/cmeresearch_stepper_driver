@@ -74,6 +74,7 @@ class StepperDriver {
       int get_new_state();
       int get_previous_state();
       bool get_under_voltage_triggered();
+      bool consume_voltage_recovered();
       void set_velocity(double cmd_vel);
 
 

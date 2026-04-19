@@ -95,6 +95,7 @@ private:
     bool high_velocity_chopper_mode_;
 
     int stepper_state_;
+    bool prev_low_voltage_ = false;
 };
 
 #endif // STEPPER_DRIVER_ROS_WRAPPER_HPP

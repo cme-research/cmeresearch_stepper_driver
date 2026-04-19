@@ -221,10 +221,18 @@ void SilentStepperDriverWrapper::timer_callback() {
 
     stepper_feedback_publisher_->publish(stepper_feedback_msg_);
 
-    // Publish state when low voltage is detected
-    if (stepper_driver_->get_under_voltage_triggered()) {
+    const bool low_voltage = stepper_driver_->get_under_voltage_triggered();
+    if (low_voltage && !prev_low_voltage_) {
         std_msgs::msg::String state_msg;
         state_msg.data = "low_voltage";
         state_publisher_->publish(state_msg);
+        RCLCPP_WARN(node_->get_logger(), "StepperDriver: low voltage detected");
     }
+    if (stepper_driver_->consume_voltage_recovered()) {
+        std_msgs::msg::String state_msg;
+        state_msg.data = "idle";
+        state_publisher_->publish(state_msg);
+        RCLCPP_INFO(node_->get_logger(), "StepperDriver: voltage recovered, state -> idle");
+    }
+    prev_low_voltage_ = low_voltage;
 }

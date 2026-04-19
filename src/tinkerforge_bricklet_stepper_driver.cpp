@@ -341,6 +341,14 @@ bool StepperDriver::get_under_voltage_triggered() {
   return bricklet_is_configured_ ? under_voltage_triggered_ : false;
 }
 
+bool StepperDriver::consume_voltage_recovered() {
+  if (reset_after_under_voltage_triggered_) {
+    reset_after_under_voltage_triggered_ = false;
+    return true;
+  }
+  return false;
+}
+
 void StepperDriver::set_velocity(double cmd_vel) {
 
   // cmd_vel in rad/s to steps/s
