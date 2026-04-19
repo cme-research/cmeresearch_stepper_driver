@@ -142,7 +142,8 @@ bool SilentStepperDriverWrapper::initialize()
 //    StepperDriver stepper(bricklet_host_, bricklet_port_);
 	stepper_feedback_publisher_ = node_->create_publisher<cmeresearch_msgs::msg::TinkerStepperFeedback>("drive_output", 10);
 
-	state_publisher_ = node_->create_publisher<std_msgs::msg::String>("state", 10);
+	state_publisher_ = node_->create_publisher<std_msgs::msg::String>(
+      "state", rclcpp::QoS(1).transient_local());
 
 	sub_drive_cmd_ = node_->create_subscription<cmeresearch_msgs::msg::TinkerStepperCommand>("drive_input", 10, std::bind(&SilentStepperDriverWrapper::drive_callback, this, std::placeholders::_1));
 
@@ -170,10 +171,16 @@ bool SilentStepperDriverWrapper::initialize()
     timer_ = node_->create_wall_timer(100ms, std::bind(&SilentStepperDriverWrapper::timer_callback, this));
     if (stepper_driver_->init() == 0) {
       RCLCPP_INFO(node_->get_logger(), "StepperDriver: Initialized the StepperDriverWrapper. Finished. Waiting for commands.");
+      std_msgs::msg::String state_msg;
+      state_msg.data = "initialized";
+      state_publisher_->publish(state_msg);
       return true;
-	}
+    }
 
-    RCLCPP_INFO(node_->get_logger(), "StepperDriver: Failed to initialize the StepperDriver");
+    RCLCPP_ERROR(node_->get_logger(), "StepperDriver: Failed to initialize the StepperDriver");
+    std_msgs::msg::String state_msg;
+    state_msg.data = "error";
+    state_publisher_->publish(state_msg);
     return false;
 }
 
