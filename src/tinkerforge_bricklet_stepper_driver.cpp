@@ -33,7 +33,7 @@ StepperDriver::StepperDriver(
   int acceleration,
   int deceleration,
   int step_per_revolution,
-  int gear_ratio,
+  double gear_ratio,
   int max_step_vel,
   int standstill_current,
   int motor_run_current,
@@ -350,10 +350,15 @@ bool StepperDriver::consume_voltage_recovered() {
 }
 
 void StepperDriver::set_velocity(double cmd_vel) {
-
-  // cmd_vel in rad/s to steps/s
-  double revolutions_per_sec = (cmd_vel) / (2 * M_PI);
-  uint16_t steps_per_sec = std::round(revolutions_per_sec * steps_per_revolution_ * step_resolution_);
-  //fprintf(stderr, "set_velocity in steps per second %d\n", steps_per_sec);
+  // cmd_vel: motor-shaft rad/s (caller has already multiplied wheel rad/s by gear_ratio).
+  // Bricklet wants microsteps/s on the motor shaft, capped at max_step_vel_
+  // and the hardware uint16_t range.
+  const double revolutions_per_sec = cmd_vel / (2.0 * M_PI);
+  const double requested =
+    revolutions_per_sec * steps_per_revolution_ * step_resolution_;
+  const double clamped = std::min(std::max(requested, 0.0),
+                                  static_cast<double>(max_step_vel_));
+  const uint16_t steps_per_sec =
+    static_cast<uint16_t>(std::min<double>(std::lround(clamped), 65535.0));
   silent_stepper_v2_set_max_velocity(&brickletStepperV2_, steps_per_sec);
 }

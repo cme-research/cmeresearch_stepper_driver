@@ -79,7 +79,7 @@ private:
     int deceleration_;
     int steps_per_revolution_;
     bool mirror_direction_;
-    int gear_ratio_;
+    double gear_ratio_;
     int max_step_vel_;
     std::string wheel_name_;
     bool hw_simulation_;
