@@ -218,6 +218,10 @@ void SilentStepperDriverWrapper::timer_callback() {
 	stepper_feedback_msg_.header.stamp = node_->now();
     stepper_feedback_msg_.current_velocity = stepper_driver_->get_current_velocity();
     stepper_feedback_msg_.current_position = stepper_driver_->get_current_position();
+    // Voltage/current are reported by the bricklet (mV / mA). Previously these
+    // were left at 0, so the webapp's motor-voltage tile always showed 0 V.
+    stepper_feedback_msg_.input_voltage = stepper_driver_->get_input_voltage();
+    stepper_feedback_msg_.current_consumption = stepper_driver_->get_current_consumption();
 
     stepper_feedback_publisher_->publish(stepper_feedback_msg_);
 

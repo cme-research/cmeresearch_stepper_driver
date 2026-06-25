@@ -329,6 +329,14 @@ int StepperDriver::get_current_position() {
   return bricklet_is_configured_ ? current_position_ : 0;
 }
 
+int StepperDriver::get_input_voltage() {
+  return bricklet_is_configured_ ? input_voltage_ : 0;
+}
+
+int StepperDriver::get_current_consumption() {
+  return bricklet_is_configured_ ? current_consumption_ : 0;
+}
+
 int StepperDriver::get_new_state() {
   return bricklet_is_configured_ ? state_new_ : 0;
 }
