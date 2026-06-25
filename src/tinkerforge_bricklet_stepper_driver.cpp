@@ -42,7 +42,8 @@ StepperDriver::StepperDriver(
   int stealth_threshold,
   int coolstep_threshold,
   int classic_threshold,
-  bool high_velocity_chopper_mode)
+  bool high_velocity_chopper_mode,
+  int freewheel_mode)
 {
   bricklet_host_ = bricklet_host;
   bricklet_port_ = bricklet_port;
@@ -73,6 +74,8 @@ StepperDriver::StepperDriver(
   coolstep_threshold_ = coolstep_threshold;
   classic_threshold_ = classic_threshold;
   high_velocity_chopper_mode_ = high_velocity_chopper_mode;
+  // Clamp to the valid SilentStepper V2 freewheel-mode range [0, 3].
+  freewheel_mode_ = (freewheel_mode < 0) ? 0 : ((freewheel_mode > 3) ? 3 : freewheel_mode);
 }
 
 
@@ -175,6 +178,22 @@ void StepperDriver::cb_enumerate(const char *uid, const char *connected_uid,
                                                     stepperDriver->classic_threshold_,
                                                     stepperDriver->high_velocity_chopper_mode_);
   			fprintf(stderr, "bricklet basic configuration set.\n");
+            // Stealth configuration: the freewheel_mode field governs the
+            // standstill behaviour when standstill_current == 0. Without this
+            // call the bricklet keeps its default freewheel mode (Normal), so
+            // setting standstill_current to 0 has no observable effect. The
+            // other fields are the SilentStepper V2 firmware defaults
+            // (enable_stealth, amplitude 128, gradient 4, autoscale on,
+            // force_symmetric off), so only freewheel_mode is changed.
+            silent_stepper_v2_set_stealth_configuration(&(stepperDriver->brickletStepperV2_),
+                                                    true,   // enable_stealth
+                                                    128,    // amplitude
+                                                    4,      // gradient
+                                                    true,   // enable_autoscale
+                                                    false,  // force_symmetric
+                                                    (uint8_t)stepperDriver->freewheel_mode_);
+            fprintf(stderr, "bricklet stealth configuration set (freewheel_mode=%d).\n",
+                    stepperDriver->freewheel_mode_);
             silent_stepper_v2_set_all_callback_configuration(&(stepperDriver->brickletStepperV2_), 100);
             fprintf(stderr, "bricklet all callback configuration set.\n");
             silent_stepper_v2_register_callback(&(stepperDriver->brickletStepperV2_),
@@ -327,6 +346,14 @@ int StepperDriver::get_current_velocity() {
 
 int StepperDriver::get_current_position() {
   return bricklet_is_configured_ ? current_position_ : 0;
+}
+
+int StepperDriver::get_input_voltage() {
+  return bricklet_is_configured_ ? input_voltage_ : 0;
+}
+
+int StepperDriver::get_current_consumption() {
+  return bricklet_is_configured_ ? current_consumption_ : 0;
 }
 
 int StepperDriver::get_new_state() {

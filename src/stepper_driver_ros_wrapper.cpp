@@ -58,6 +58,9 @@ bool SilentStepperDriverWrapper::initialize()
     coolstep_threshold_ = node_->declare_parameter<int>("coolstep_threshold", 500);
     classic_threshold_ = node_->declare_parameter<int>("classic_threshold", 600);
     high_velocity_chopper_mode_ = node_->declare_parameter<bool>("high_velocity_chopper_mode", false);
+    // Freewheel mode for standstill when standstill_current == 0:
+    //   0 = Normal, 1 = Freewheeling, 2 = Coil short LS, 3 = Coil short HS.
+    freewheel_mode_ = node_->declare_parameter<int>("freewheel_mode", 0);
 
     bricklet_host_ = node_->get_parameter("bricklet_host").as_string();
     bricklet_port_ = node_->get_parameter("bricklet_port").as_int();
@@ -82,6 +85,7 @@ bool SilentStepperDriverWrapper::initialize()
     coolstep_threshold_ = node_->get_parameter("coolstep_threshold").as_int();
     classic_threshold_ = node_->get_parameter("classic_threshold").as_int();
     high_velocity_chopper_mode_ = node_->get_parameter("high_velocity_chopper_mode").as_bool();
+    freewheel_mode_ = node_->get_parameter("freewheel_mode").as_int();
 
     RCLCPP_INFO(node_->get_logger(), "bricklet_host : %s", bricklet_host_.c_str());
     RCLCPP_INFO(node_->get_logger(), "bricklet_port : %d", bricklet_port_);
@@ -106,6 +110,7 @@ bool SilentStepperDriverWrapper::initialize()
     RCLCPP_INFO(node_->get_logger(), "coolstep_threshold : %d", coolstep_threshold_);
     RCLCPP_INFO(node_->get_logger(), "classic_threshold : %d", classic_threshold_);
     RCLCPP_INFO(node_->get_logger(), "high_velocity_chopper_mode : %s", BoolToString(high_velocity_chopper_mode_));
+    RCLCPP_INFO(node_->get_logger(), "freewheel_mode : %d", freewheel_mode_);
 
     std::vector<rclcpp::Parameter> new_params{
         rclcpp::Parameter("bricklet_host", bricklet_host_),
@@ -129,7 +134,8 @@ bool SilentStepperDriverWrapper::initialize()
         rclcpp::Parameter("stealth_threshold", stealth_threshold_),
         rclcpp::Parameter("coolstep_threshold", coolstep_threshold_),
         rclcpp::Parameter("classic_threshold", classic_threshold_),
-        rclcpp::Parameter("high_velocity_chopper_mode", high_velocity_chopper_mode_)
+        rclcpp::Parameter("high_velocity_chopper_mode", high_velocity_chopper_mode_),
+        rclcpp::Parameter("freewheel_mode", freewheel_mode_)
     };
 
 //    auto topic_callback = [this](unico_msgs::msg::Drive::UniquePtr msg) -> void {
@@ -166,7 +172,8 @@ bool SilentStepperDriverWrapper::initialize()
             stealth_threshold_,
             coolstep_threshold_,
             classic_threshold_,
-            high_velocity_chopper_mode_);
+            high_velocity_chopper_mode_,
+            freewheel_mode_);
 
     timer_ = node_->create_wall_timer(100ms, std::bind(&SilentStepperDriverWrapper::timer_callback, this));
     if (stepper_driver_->init() == 0) {
@@ -218,6 +225,10 @@ void SilentStepperDriverWrapper::timer_callback() {
 	stepper_feedback_msg_.header.stamp = node_->now();
     stepper_feedback_msg_.current_velocity = stepper_driver_->get_current_velocity();
     stepper_feedback_msg_.current_position = stepper_driver_->get_current_position();
+    // Voltage/current are reported by the bricklet (mV / mA). Previously these
+    // were left at 0, so the webapp's motor-voltage tile always showed 0 V.
+    stepper_feedback_msg_.input_voltage = stepper_driver_->get_input_voltage();
+    stepper_feedback_msg_.current_consumption = stepper_driver_->get_current_consumption();
 
     stepper_feedback_publisher_->publish(stepper_feedback_msg_);
 

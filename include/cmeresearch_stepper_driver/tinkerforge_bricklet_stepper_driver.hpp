@@ -52,7 +52,12 @@ class StepperDriver {
           int stealth_threshold = 1000,
           int coolstep_threshold = 1001,
           int classic_threshold = 2000,
-          bool high_velocity_chopper_mode = false
+          bool high_velocity_chopper_mode = false,
+          // Freewheel mode governs the standstill behaviour when standstill_current
+          // is 0 (see SilentStepper V2 set_stealth_configuration):
+          //   0 = Normal, 1 = Freewheeling, 2 = Coil short LS, 3 = Coil short HS.
+          // Default 0 preserves the previous behaviour (firmware default).
+          int freewheel_mode = 0
       );
       // destructor
       ~StepperDriver()
@@ -71,6 +76,8 @@ class StepperDriver {
 
       int get_current_velocity();
       int get_current_position();
+      int get_input_voltage();       // mV, as reported by the bricklet
+      int get_current_consumption(); // mA, as reported by the bricklet
       int get_new_state();
       int get_previous_state();
       bool get_under_voltage_triggered();
@@ -108,6 +115,7 @@ class StepperDriver {
         int coolstep_threshold_;
         int classic_threshold_;
         bool high_velocity_chopper_mode_;
+        int freewheel_mode_;
 
 
         // hardware info coming from the bricklet

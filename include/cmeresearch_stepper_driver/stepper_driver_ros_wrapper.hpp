@@ -93,6 +93,7 @@ private:
     int coolstep_threshold_;
     int classic_threshold_;
     bool high_velocity_chopper_mode_;
+    int freewheel_mode_;
 
     int stepper_state_;
     bool prev_low_voltage_ = false;
