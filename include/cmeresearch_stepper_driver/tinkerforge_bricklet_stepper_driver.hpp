@@ -76,6 +76,8 @@ class StepperDriver {
 
       int get_current_velocity();
       int get_current_position();
+      int get_input_voltage();       // mV, as reported by the bricklet
+      int get_current_consumption(); // mA, as reported by the bricklet
       int get_new_state();
       int get_previous_state();
       bool get_under_voltage_triggered();
