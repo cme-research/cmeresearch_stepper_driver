@@ -206,6 +206,19 @@ void SilentStepperDriverWrapper::drive_callback(const cmeresearch_msgs::msg::Tin
       		cmd_vel *= -1;
     	}
 
+		// Remember the commanded rotation direction so timer_callback can
+		// re-sign the feedback velocity (the bricklet only reports an unsigned
+		// magnitude). The sign is taken in the joint-command convention
+		// (msg->velocity, before mirror_direction), which is the frame the
+		// mecanum controller's odometry expects — mirror_direction is only a
+		// hardware-wiring correction. A zero command leaves the last direction
+		// untouched (the motor just ramps to standstill).
+		if (msg->velocity > 0.0) {
+			last_cmd_direction_ = 1.0;
+		} else if (msg->velocity < 0.0) {
+			last_cmd_direction_ = -1.0;
+		}
+
 		if (cmd_vel >= 0) {
   			stepper_driver_->drive_forward();
         	stepper_driver_->set_velocity(cmd_vel * gear_ratio_);
@@ -221,9 +234,13 @@ void SilentStepperDriverWrapper::drive_callback(const cmeresearch_msgs::msg::Tin
 void SilentStepperDriverWrapper::timer_callback() {
   	stepper_state_ = stepper_driver_->get_new_state();
     int prev_state = stepper_driver_->get_previous_state();
-    // TODO: save state to recognice direction change?
 	stepper_feedback_msg_.header.stamp = node_->now();
-    stepper_feedback_msg_.current_velocity = stepper_driver_->get_current_velocity();
+    // The bricklet's current_velocity is an unsigned magnitude; re-apply the
+    // commanded direction so consumers (cmexa_base -> mecanum odometry) see a
+    // signed wheel velocity. Otherwise every wheel reads as spinning forward
+    // and e.g. a sideways move integrates as forward motion in odometry.
+    stepper_feedback_msg_.current_velocity =
+        last_cmd_direction_ * static_cast<float>(stepper_driver_->get_current_velocity());
     stepper_feedback_msg_.current_position = stepper_driver_->get_current_position();
     // Voltage/current are reported by the bricklet (mV / mA). Previously these
     // were left at 0, so the webapp's motor-voltage tile always showed 0 V.

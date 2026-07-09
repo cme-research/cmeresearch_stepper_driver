@@ -97,6 +97,12 @@ private:
 
     int stepper_state_;
     bool prev_low_voltage_ = false;
+
+    //! Sign (+1/-1) of the most recent nonzero velocity command. The bricklet
+    //! reports current_velocity as an unsigned magnitude (uint16_t), so this
+    //! restores the direction on the published feedback so downstream odometry
+    //! is not blind to which way each wheel is turning.
+    double last_cmd_direction_ = 1.0;
 };
 
 #endif // STEPPER_DRIVER_ROS_WRAPPER_HPP
