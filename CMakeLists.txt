@@ -47,6 +47,10 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_stepper_math test/test_stepper_math.cpp)
   target_include_directories(test_stepper_math PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+  # Node-level test: runs stepper_driver_node in hw_simulation mode.
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_node_simulation.launch.py TIMEOUT 120)
 endif()
 
 ament_package()
