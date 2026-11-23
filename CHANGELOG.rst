@@ -2,8 +2,23 @@
 Changelog for package cmeresearch_stepper_driver
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-0.2.0 (unreleased)
+0.3.0 (unreleased)
 ------------------
+
+* Position control for stand-alone actuators: ``control_mode: position``
+  provides the ``move_steps`` action (``cmeresearch_msgs/action/MoveSteps``:
+  relative / absolute moves in microsteps with a velocity limit, cancelable,
+  feedback with remaining steps) and the ``zero_position`` service.
+  Absolute moves require a reference, which is cleared on every bricklet
+  (re)configuration. Moves are aborted on emergency stop (``robot_state_topic``),
+  disconnect, reconfiguration or low supply voltage. Simulated in
+  ``hw_simulation``.
+* Bricklet position setters are acknowledged.
+* Example ``config/actuator_example.yaml``.
+* Velocity mode (wheels) unchanged; ``control_mode`` defaults to ``velocity``.
+
+0.2.0
+-----
 
 Safety / robustness
 
