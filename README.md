@@ -1,9 +1,14 @@
 # cmeresearch_stepper_driver
 
 ROS 2 (Jazzy) driver for the [TinkerForge Silent Stepper Bricklet 2.0](https://www.tinkerforge.com/en/doc/Hardware/Bricklets/Silent_Stepper_V2.html).
-One `stepper_driver_node` runs per wheel; it talks to `brickd` over TCP and drives
-the motor in continuous-drive mode (velocity control with the bricklet's own
-acceleration / deceleration ramps).
+One `stepper_driver_node` runs per motor; it talks to `brickd` over TCP. Two modes
+(`control_mode`):
+
+- **`velocity`** (default) — wheels under `cmexa_base`: continuous-drive velocity
+  control with the bricklet's own acceleration / deceleration ramps.
+- **`position`** — stand-alone actuators (lift, turntable, flap, ...): moves by / to
+  a number of microsteps via the `move_steps` action, see
+  [Position mode](#position-mode-stand-alone-actuators).
 
 ```
 twist_mux ─▶ mecanum controller ─▶ cmexa_base (ros2_control)
@@ -16,7 +21,9 @@ twist_mux ─▶ mecanum controller ─▶ cmexa_base (ros2_control)
 
 | Name | Type | Description |
 |------|------|-------------|
-| `drive_input` (sub) | `cmeresearch_msgs/TinkerStepperCommand` | Wheel velocity `velocity` [rad/s]; `position` is ignored |
+| `drive_input` (sub, velocity mode) | `cmeresearch_msgs/TinkerStepperCommand` | Wheel velocity `velocity` [rad/s]; `position` is ignored |
+| `move_steps` (action, position mode) | `cmeresearch_msgs/action/MoveSteps` | Move by / to microsteps |
+| `zero_position` (service, position mode) | `std_srvs/srv/Trigger` | Define the current position as 0 |
 | `drive_output` (pub, 10 Hz) | `cmeresearch_msgs/TinkerStepperFeedback` | See below |
 | `state` (pub, latched, on change) | `std_msgs/String` | See [Driver states](#driver-states) |
 
@@ -71,8 +78,10 @@ node into `error` and make it exit instead of being truncated silently.
 | `max_step_vel` | `1000` | Velocity cap [microsteps/s], 1–65535 |
 | `acceleration` / `deceleration` | `1000` | Ramps [steps/s²], 0–65535 |
 | `wheel_name` | `wheel` | Used in logs and as feedback `frame_id` |
-| `hw_simulation` | `false` | No hardware: feedback echoes the commanded velocity |
-| `command_timeout` | `0.5` | Stop the wheel if no velocity command arrives for this long [s]; `0` disables |
+| `hw_simulation` | `false` | No hardware: feedback echoes the commanded velocity / simulates moves |
+| `control_mode` | `velocity` | `velocity` (wheels, `drive_input`) or `position` (actuators, `move_steps`) |
+| `command_timeout` | `0.5` | Velocity mode: stop the wheel if no command arrives for this long [s]; `0` disables |
+| `robot_state_topic` | `/robot_state` | Position mode: abort moves while this `RobotState` is `emergency_stop`; empty disables |
 | `feedback_timeout` | `0.5` | Bricklet data older than this counts as lost [s] (data arrives every 100 ms) |
 | `connect_retry_ms` | `1000` | Wait between attempts to reach brickd [ms] |
 | `standstill_current`, `motor_run_current` | `200`, `800` | [mA]; `standstill_current` ≤ `motor_run_current` |
@@ -83,7 +92,8 @@ node into `error` and make it exit instead of being truncated silently.
 | `under_voltage_mv` | `17000` | Supply level that triggers `low_voltage` |
 | `under_voltage_hysteresis_mv` | `500` | `low_voltage` clears at threshold + hysteresis |
 
-`config/cmexaiii.yaml` contains the full CMEXAIII configuration as a parameter file.
+`config/cmexaiii.yaml` contains the full CMEXAIII configuration as a parameter file,
+`config/actuator_example.yaml` an actuator in position mode.
 
 ### Must match `cmexa_base`
 
@@ -101,6 +111,46 @@ These values must be identical on both sides, otherwise odometry is scaled wrong
 
 `cmeresearch_bringup`'s tests check that all wheels of one robot use the same
 values; the cross-repo match is not checked automatically yet.
+
+## Position mode (stand-alone actuators)
+
+With `control_mode: position` the node drives an actuator to positions instead of
+taking a velocity stream. There is no `drive_input` subscription and no command
+watchdog — a move runs to its end on the bricklet (ramps from `acceleration` /
+`deceleration`) unless it is canceled or aborted.
+
+```bash
+# define the current position as 0 (e.g. at the home / end stop)
+ros2 service call /actuators/zero_position std_srvs/srv/Trigger
+# absolute: to 16000 microsteps (= 10 motor revolutions at 200 x 8), max 3000 microsteps/s
+ros2 action send_goal --feedback /actuators/move_steps cmeresearch_msgs/action/MoveSteps \
+  "{mode: 1, steps: 16000, max_velocity: 3000}"
+# relative: 800 microsteps back
+ros2 action send_goal /actuators/move_steps cmeresearch_msgs/action/MoveSteps "{mode: 0, steps: -800}"
+```
+
+| Goal field | Meaning |
+|------------|---------|
+| `mode` | `RELATIVE` (0): move by `steps`; `ABSOLUTE` (1): move to position `steps` |
+| `steps` | Microsteps on the motor shaft, actuator direction (`mirror_direction` applied). One motor revolution = `steps_per_revolution × step_resolution` |
+| `max_velocity` | Microsteps/s for this move; `0` = `max_step_vel`, larger values are capped at `max_step_vel` |
+
+Result: `success`, `final_position`, `message`. Feedback (20 Hz): `current_position`,
+`remaining_steps` (signed, target − position), `current_velocity`.
+
+Rules:
+
+- **One move at a time:** a new goal is rejected while a move runs (cancel first).
+- **Absolute moves need a reference:** call `zero_position` first. The reference is
+  cleared whenever the bricklet is (re)configured, because a bricklet reset restarts
+  its step counter at 0.
+- **Aborted** (result `success: false`, reason in `message`) when the robot is in
+  `emergency_stop` (also refused while it lasts), the driver is not ready / gets
+  `disconnected`, the bricklet is reconfigured, or the supply voltage is low.
+- **Cancel** ramps the motor down with the configured deceleration.
+- The `drive_output` topic keeps reporting the raw motor-frame step counter; the
+  action reports positions in the actuator frame.
+- With `hw_simulation: true` moves are simulated at the requested velocity.
 
 ## Usage on the robots
 
@@ -165,14 +215,15 @@ For a single-wheel example see `launch/tinkerforge_drivers.launch.py`.
 
 | Path | Contents |
 |------|----------|
-| `src/stepper_driver_ros_wrapper.cpp` | ROS node: parameters, topics, states, command watchdog, mirroring / gear ratio, `hw_simulation` |
-| `src/tinkerforge_bricklet_stepper_driver.cpp` | `StepperDriver`: connection retries, enumeration, configuration, feedback / staleness, command path — no ROS, no TinkerForge |
+| `src/stepper_driver_ros_wrapper.cpp` | ROS node: parameters, topics, states, command watchdog, `move_steps` action / `zero_position`, mirroring / gear ratio, `hw_simulation` |
+| `src/tinkerforge_bricklet_stepper_driver.cpp` | `StepperDriver`: connection retries, enumeration, configuration, feedback / staleness, velocity and position commands — no ROS, no TinkerForge |
 | `src/tinkerforge_io.cpp` | `BrickletIo` implementation on the TinkerForge bindings |
 | `include/cmeresearch_stepper_driver/bricklet_io.hpp` | `BrickletIo` interface (seam used by the tests) |
 | `include/cmeresearch_stepper_driver/stepper_config.hpp` | `StepperConfig`, `StepperFeedback`, parameter validation |
 | `include/cmeresearch_stepper_driver/stepper_math.hpp` | Pure helpers (unit conversion, step-resolution register, direction, under-voltage hysteresis, command watchdog) |
 | `src/tinkerforge/`, `include/tinkerforge/` | Vendored TinkerForge C bindings (`ip_connection`, `bricklet_silent_stepper_v2`; CC0, see `tfextern/license.txt`) |
 | `config/cmexaiii.yaml` | Example parameter file (CMEXAIII) |
+| `config/actuator_example.yaml` | Example actuator in position mode |
 | `test/` | Unit and launch tests (below) |
 
 ## Build & test
@@ -192,12 +243,17 @@ Tests (no hardware needed):
   `BrickletIo`: parameter validation, connection retries, only the bricklet at
   `brick_position` is configured, rejected configuration → `error`, stale data and
   brickd disconnects report velocity 0, reconfiguration after reconnect, command
-  path, under-voltage re-arm, shutdown.
+  path, under-voltage re-arm, shutdown; position moves (relative / absolute,
+  reference, velocity cap, cancel, abort on disconnect / reconfiguration).
 - `test/test_node_simulation.launch.py` (launch_testing) — runs the node with
   `hw_simulation`, mirroring and gear ratio 2: command → signed feedback, clamping,
   zero and NaN commands, command watchdog (stop after 0.5 s), integrated position,
   read-only parameters, latched `initialized` state, and an invalid
   `step_resolution` making the node exit with code 1.
+- `test/test_position_action.launch.py` (launch_testing) — position mode in
+  `hw_simulation` through a real action client: relative move with feedback,
+  absolute move only after `zero_position`, second goal rejected, cancel,
+  emergency stop aborts and blocks moves until the robot state clears.
 
 CI (`.github/workflows/build.yml`, `ros-tooling/action-ros-ci`) builds the package with
 `cmeresearch_msgs` from `.ci.repos` (its `jazzy_dev` branch) and runs these tests on

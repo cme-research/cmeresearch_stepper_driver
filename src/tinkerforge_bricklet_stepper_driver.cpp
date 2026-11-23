@@ -17,7 +17,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "cmeresearch_stepper_driver/tinkerforge_bricklet_stepper_driver.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <stdexcept>
 #include <utility>
@@ -75,6 +77,7 @@ StepperDriver::StepperDriver(
       handle_all_data(v, p, r, u, i);
     };
   cb.on_new_state = [this](uint8_t s, uint8_t prev) {handle_new_state(s, prev);};
+  cb.on_position_reached = [this](int32_t position) {handle_position_reached(position);};
   // Registered before connecting so the initial CONNECTED event (which
   // triggers enumeration) cannot be missed.
   io_->set_callbacks(std::move(cb));
@@ -194,6 +197,7 @@ void StepperDriver::handle_disconnected()
 {
   connected_.store(false);
   configured_.store(false);
+  abort_move("connection to brickd lost");
   log(LogLevel::Warn, "Connection to brickd lost, waiting for reconnect");
 }
 
@@ -208,6 +212,7 @@ void StepperDriver::handle_enumerate(const EnumerateInfo & info)
   if (info.type == EnumerateInfo::Type::Disconnected) {
     if (device_uid_ == info.uid) {
       configured_.store(false);
+      abort_move("bricklet disconnected");
       log(LogLevel::Warn, "Bricklet " + info.uid + " disconnected");
     }
     return;
@@ -235,6 +240,10 @@ void StepperDriver::configure_device_locked(const std::string & uid)
   }
 
   configured_.store(false);
+  // A (re)configuration usually follows a bricklet reset, which restarts the
+  // step counter at 0: any running move and the position reference are void.
+  abort_move("bricklet reconfigured");
+  referenced_.store(false);
   const int e_code = io_->configure(config_, step_resolution_register_);
   if (e_code != 0) {
     config_error_.store(true);
@@ -358,6 +367,145 @@ void StepperDriver::handle_new_state(uint8_t state_new, uint8_t state_previous)
   std::lock_guard<std::mutex> lock(feedback_mutex_);
   feedback_.state = state_new;
   feedback_.previous_state = state_previous;
+}
+
+// --- position control ------------------------------------------------------------
+
+bool StepperDriver::start_move(
+  bool absolute, int32_t steps, uint16_t max_velocity, std::string * error)
+{
+  auto fail = [error](const std::string & msg) {
+      if (error) {*error = msg;}
+      return false;
+    };
+
+  std::lock_guard<std::mutex> lock(device_mutex_);
+  const auto st = status();
+  if (st != DriverStatus::Ready) {
+    return fail(std::string("driver not ready (") + to_string(st) + ")");
+  }
+  if (absolute && !referenced_.load()) {
+    return fail("absolute move needs a reference: call zero_position first");
+  }
+  {
+    std::lock_guard<std::mutex> move_lock(move_mutex_);
+    if (move_.state == MoveStatus::State::Moving) {
+      return fail("another move is still running");
+    }
+  }
+
+  int32_t start = 0;
+  {
+    std::lock_guard<std::mutex> fb_lock(feedback_mutex_);
+    start = feedback_.position;
+  }
+  const int64_t target64 = absolute ? int64_t{steps} : int64_t{start} + steps;
+  if (target64 < INT32_MIN || target64 > INT32_MAX) {
+    return fail("target position out of range");
+  }
+  const auto target = static_cast<int32_t>(target64);
+  const uint16_t velocity = static_cast<uint16_t>(
+    max_velocity == 0 ? config_.max_step_vel : std::min<int>(max_velocity, config_.max_step_vel));
+
+  ensure_enabled_locked();
+  io_->set_max_velocity(velocity);
+  const int e_code = absolute ? io_->set_target_position(steps) : io_->set_steps(steps);
+  if (e_code != 0) {
+    return fail("bricklet rejected the move (error " + std::to_string(e_code) + ")");
+  }
+  commanded_direction_.store(target >= start ? 1 : -1);
+
+  std::lock_guard<std::mutex> move_lock(move_mutex_);
+  move_ = MoveStatus{};
+  move_.target = target;
+  if (target == start) {
+    // Nothing to do; the bricklet would not report POSITION_REACHED.
+    move_.state = MoveStatus::State::Reached;
+    move_.final_position = start;
+  } else {
+    move_.state = MoveStatus::State::Moving;
+    log(
+      LogLevel::Info, "Move " + std::string(absolute ? "to " : "by ") + std::to_string(steps) +
+      " microsteps (target " + std::to_string(target) + ", " + std::to_string(velocity) +
+      " microsteps/s)");
+  }
+  return true;
+}
+
+void StepperDriver::cancel_move(const std::string & reason)
+{
+  std::lock_guard<std::mutex> lock(device_mutex_);
+  bool moving = false;
+  {
+    std::lock_guard<std::mutex> move_lock(move_mutex_);
+    moving = move_.state == MoveStatus::State::Moving;
+  }
+  if (moving && configured_.load()) {
+    io_->stop();   // decelerates with the configured ramp
+  }
+  abort_move(reason);
+}
+
+void StepperDriver::abort_move(const std::string & reason)
+{
+  std::lock_guard<std::mutex> move_lock(move_mutex_);
+  if (move_.state != MoveStatus::State::Moving) {
+    return;
+  }
+  move_.state = MoveStatus::State::Aborted;
+  move_.reason = reason;
+  {
+    std::lock_guard<std::mutex> fb_lock(feedback_mutex_);
+    move_.final_position = feedback_.position;
+  }
+  log(LogLevel::Warn, "Move aborted: " + reason);
+}
+
+MoveStatus StepperDriver::move_status() const
+{
+  std::lock_guard<std::mutex> move_lock(move_mutex_);
+  return move_;
+}
+
+bool StepperDriver::set_reference(int32_t position, std::string * error)
+{
+  auto fail = [error](const std::string & msg) {
+      if (error) {*error = msg;}
+      return false;
+    };
+  std::lock_guard<std::mutex> lock(device_mutex_);
+  if (status() != DriverStatus::Ready) {
+    return fail(std::string("driver not ready (") + to_string(status()) + ")");
+  }
+  {
+    std::lock_guard<std::mutex> move_lock(move_mutex_);
+    if (move_.state == MoveStatus::State::Moving) {
+      return fail("cannot set the reference while moving");
+    }
+  }
+  const int e_code = io_->set_current_position(position);
+  if (e_code != 0) {
+    return fail("bricklet rejected the reference (error " + std::to_string(e_code) + ")");
+  }
+  {
+    std::lock_guard<std::mutex> fb_lock(feedback_mutex_);
+    feedback_.position = position;
+    have_position_ = false;   // the counter jumped: no direction from this delta
+  }
+  referenced_.store(true);
+  log(LogLevel::Info, "Position reference set to " + std::to_string(position));
+  return true;
+}
+
+void StepperDriver::handle_position_reached(int32_t position)
+{
+  std::lock_guard<std::mutex> move_lock(move_mutex_);
+  if (move_.state != MoveStatus::State::Moving) {
+    return;
+  }
+  move_.state = MoveStatus::State::Reached;
+  move_.final_position = position;
+  log(LogLevel::Info, "Position " + std::to_string(position) + " reached");
 }
 
 }  // namespace cmeresearch_stepper_driver

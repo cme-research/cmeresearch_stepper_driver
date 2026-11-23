@@ -17,8 +17,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "cmeresearch_stepper_driver/stepper_driver_ros_wrapper.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <stdexcept>
 #include <utility>
@@ -55,6 +57,14 @@ SilentStepperDriverWrapper::SilentStepperDriverWrapper(rclcpp::Node::SharedPtr n
 {
 }
 
+SilentStepperDriverWrapper::~SilentStepperDriverWrapper()
+{
+  // execute() leaves its loop once rclcpp is shut down.
+  if (execute_thread_.joinable()) {
+    execute_thread_.join();
+  }
+}
+
 double SilentStepperDriverWrapper::now_s() const
 {
   return std::chrono::duration<double>(
@@ -88,9 +98,15 @@ bool SilentStepperDriverWrapper::initialize()
   wheel_name_ = declare<std::string>(n, "wheel_name", "wheel", "Log prefix and feedback frame_id");
   hw_simulation_ = declare<bool>(
     n, "hw_simulation", false, "No hardware: feedback echoes the commanded velocity");
+  const auto control_mode = declare<std::string>(
+    n, "control_mode", "velocity",
+    "velocity: drive_input topic (wheels); position: move_steps action (actuators)");
   const double command_timeout = declare<double>(
     n, "command_timeout", 0.5,
-    "Stop the wheel if no velocity command arrives for this long [s]; 0 disables");
+    "velocity mode: stop if no command arrives for this long [s]; 0 disables");
+  const auto robot_state_topic = declare<std::string>(
+    n, "robot_state_topic", "/robot_state",
+    "position mode: abort moves on emergency_stop from this RobotState topic; empty disables");
 
   c.standstill_current = declare<int>(
     n, "standstill_current", 200, "Standstill current [mA], <= motor_run_current");
@@ -129,6 +145,10 @@ bool SilentStepperDriverWrapper::initialize()
   if (!(command_timeout >= 0.0) || !std::isfinite(command_timeout)) {
     return fail("command_timeout must be >= 0 (got " + std::to_string(command_timeout) + ")");
   }
+  if (control_mode != "velocity" && control_mode != "position") {
+    return fail("control_mode must be 'velocity' or 'position' (got '" + control_mode + "')");
+  }
+  position_mode_ = control_mode == "position";
   const auto check = validate(c);
   for (const auto & w : check.warnings) {
     RCLCPP_WARN(logger, "[%s] %s", wheel_name_.c_str(), w.c_str());
@@ -140,15 +160,17 @@ bool SilentStepperDriverWrapper::initialize()
     publish_state("error");
     return false;
   }
-  watchdog_ = CommandWatchdog(command_timeout);
+  // Position moves run without a command stream; the watchdog only guards
+  // the continuous-drive (velocity) mode.
+  watchdog_ = CommandWatchdog(position_mode_ ? 0.0 : command_timeout);
 
   RCLCPP_INFO(
     logger,
-    "[%s] brickd %s:%d port '%c' | %d steps/rev x %d microsteps (interpolation %s), "
-    "gear %.3f, mirror %s, max %d steps/s, accel/decel %d/%d, command timeout %.2f s%s",
-    wheel_name_.c_str(), c.host.c_str(), c.port, c.brick_position, c.steps_per_revolution,
-    c.microsteps, c.interpolation ? "on" : "off", gear_ratio_, mirror_direction_ ? "yes" : "no",
-    c.max_step_vel, c.acceleration, c.deceleration, command_timeout,
+    "[%s] %s mode | brickd %s:%d port '%c' | %d steps/rev x %d microsteps (interpolation %s), "
+    "gear %.3f, mirror %s, max %d steps/s, accel/decel %d/%d%s",
+    wheel_name_.c_str(), control_mode.c_str(), c.host.c_str(), c.port, c.brick_position,
+    c.steps_per_revolution, c.microsteps, c.interpolation ? "on" : "off", gear_ratio_,
+    mirror_direction_ ? "yes" : "no", c.max_step_vel, c.acceleration, c.deceleration,
     hw_simulation_ ? " | HW SIMULATION" : "");
   RCLCPP_INFO(
     logger,
@@ -179,13 +201,47 @@ bool SilentStepperDriverWrapper::initialize()
     publish_state("initialized");
   }
 
-  sub_drive_cmd_ = n.create_subscription<cmeresearch_msgs::msg::TinkerStepperCommand>(
-    "drive_input", 10,
-    std::bind(&SilentStepperDriverWrapper::drive_callback, this, std::placeholders::_1));
+  if (position_mode_) {
+    using std::placeholders::_1;
+    using std::placeholders::_2;
+    move_server_ = rclcpp_action::create_server<MoveSteps>(
+      node_, "move_steps",
+      std::bind(&SilentStepperDriverWrapper::handle_goal, this, _1, _2),
+      std::bind(&SilentStepperDriverWrapper::handle_cancel, this, _1),
+      std::bind(&SilentStepperDriverWrapper::handle_accepted, this, _1));
+    zero_srv_ = n.create_service<std_srvs::srv::Trigger>(
+      "zero_position",
+      [this](const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+      std::shared_ptr<std_srvs::srv::Trigger::Response> res) {
+        std::string err;
+        res->success = zero_position(&err);
+        res->message = res->success ? "current position is now 0" : err;
+      });
+    if (!robot_state_topic.empty()) {
+      robot_state_sub_ = n.create_subscription<cmeresearch_msgs::msg::RobotState>(
+        robot_state_topic, rclcpp::QoS(1).transient_local().reliable(),
+        [this](const cmeresearch_msgs::msg::RobotState::SharedPtr msg) {
+          const bool stop = msg->state == "emergency_stop";
+          if (stop && !emergency_stop_.exchange(true)) {
+            RCLCPP_WARN(node_->get_logger(), "[%s] Emergency stop: aborting / refusing moves",
+              wheel_name_.c_str());
+          } else if (!stop) {
+            emergency_stop_.store(false);
+          }
+        });
+    }
+  } else {
+    sub_drive_cmd_ = n.create_subscription<cmeresearch_msgs::msg::TinkerStepperCommand>(
+      "drive_input", 10,
+      std::bind(&SilentStepperDriverWrapper::drive_callback, this, std::placeholders::_1));
+  }
+
   last_tick_s_ = now_s();
   timer_ = n.create_wall_timer(100ms, std::bind(&SilentStepperDriverWrapper::timer_callback, this));
 
-  RCLCPP_INFO(logger, "[%s] Stepper driver ready, waiting for commands", wheel_name_.c_str());
+  RCLCPP_INFO(
+    logger, "[%s] Stepper driver ready, waiting for %s", wheel_name_.c_str(),
+    position_mode_ ? "move_steps goals" : "commands");
   return true;
 }
 
@@ -199,6 +255,8 @@ void SilentStepperDriverWrapper::publish_state(const std::string & state)
   msg.data = state;
   state_pub_->publish(msg);
 }
+
+// --- velocity mode -----------------------------------------------------------------
 
 void SilentStepperDriverWrapper::drive_callback(
   const cmeresearch_msgs::msg::TinkerStepperCommand::SharedPtr msg)
@@ -215,6 +273,7 @@ void SilentStepperDriverWrapper::drive_callback(
   if (hw_simulation_) {
     const int32_t magnitude = rad_s_to_step_velocity(
       joint_motor_rad_s, config_.steps_per_revolution, config_.microsteps, config_.max_step_vel);
+    std::lock_guard<std::mutex> lock(sim_mutex_);
     sim_velocity_ = joint_motor_rad_s < 0.0 ? -magnitude : magnitude;
     return;
   }
@@ -222,6 +281,220 @@ void SilentStepperDriverWrapper::drive_callback(
   // mirror_direction corrects for motors mounted / wired the other way round.
   driver_->command_velocity(mirror_direction_ ? -joint_motor_rad_s : joint_motor_rad_s);
 }
+
+// --- position mode -------------------------------------------------------------------
+
+rclcpp_action::GoalResponse SilentStepperDriverWrapper::handle_goal(
+  const rclcpp_action::GoalUUID &, std::shared_ptr<const MoveSteps::Goal> goal)
+{
+  if (goal->mode != MoveSteps::Goal::RELATIVE && goal->mode != MoveSteps::Goal::ABSOLUTE) {
+    RCLCPP_WARN(node_->get_logger(), "[%s] Rejecting move: unknown mode %u",
+      wheel_name_.c_str(), goal->mode);
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+  if (goal_active_.load()) {
+    RCLCPP_WARN(node_->get_logger(), "[%s] Rejecting move: another move is running",
+      wheel_name_.c_str());
+    return rclcpp_action::GoalResponse::REJECT;
+  }
+  // Everything else (not ready, not referenced, emergency stop) is accepted and
+  // aborted in execute() so the client gets the reason in the result message.
+  return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+}
+
+rclcpp_action::CancelResponse SilentStepperDriverWrapper::handle_cancel(
+  std::shared_ptr<GoalHandle>)
+{
+  return rclcpp_action::CancelResponse::ACCEPT;
+}
+
+void SilentStepperDriverWrapper::handle_accepted(std::shared_ptr<GoalHandle> goal_handle)
+{
+  goal_active_.store(true);
+  if (execute_thread_.joinable()) {
+    execute_thread_.join();   // the previous goal already finished
+  }
+  execute_thread_ = std::thread([this, goal_handle]() {
+      execute(goal_handle);
+      goal_active_.store(false);
+    });
+}
+
+void SilentStepperDriverWrapper::execute(std::shared_ptr<GoalHandle> goal_handle)
+{
+  const auto goal = goal_handle->get_goal();
+  auto result = std::make_shared<MoveSteps::Result>();
+  auto finish = [&](bool success, const std::string & message) {
+      const auto st = move_status();
+      result->success = success;
+      result->final_position = st.final_position;
+      result->message = message;
+      return result;
+    };
+
+  if (emergency_stop_.load()) {
+    goal_handle->abort(finish(false, "emergency stop active"));
+    return;
+  }
+  std::string err;
+  if (!start_move(goal->mode == MoveSteps::Goal::ABSOLUTE, goal->steps, goal->max_velocity, &err)) {
+    RCLCPP_WARN(node_->get_logger(), "[%s] Move refused: %s", wheel_name_.c_str(), err.c_str());
+    goal_handle->abort(finish(false, err));
+    return;
+  }
+
+  auto feedback = std::make_shared<MoveSteps::Feedback>();
+  rclcpp::WallRate rate(20.0);
+  while (rclcpp::ok()) {
+    if (goal_handle->is_canceling()) {
+      cancel_move("canceled");
+      goal_handle->canceled(finish(false, "canceled"));
+      return;
+    }
+    if (emergency_stop_.load()) {
+      cancel_move("emergency stop");
+      goal_handle->abort(finish(false, "emergency stop"));
+      return;
+    }
+    if (!hw_simulation_) {
+      const auto status = driver_->status();
+      if (status != DriverStatus::Ready) {
+        const std::string why = std::string("driver ") + to_string(status);
+        cancel_move(why);
+        goal_handle->abort(finish(false, why));
+        return;
+      }
+      if (driver_->feedback().under_voltage) {
+        cancel_move("low supply voltage");
+        goal_handle->abort(finish(false, "low supply voltage"));
+        return;
+      }
+    }
+
+    const auto st = move_status();
+    if (st.state == MoveStatus::State::Reached) {
+      goal_handle->succeed(finish(true, "reached"));
+      return;
+    }
+    if (st.state == MoveStatus::State::Aborted) {
+      goal_handle->abort(finish(false, st.reason));
+      return;
+    }
+
+    if (hw_simulation_) {
+      std::lock_guard<std::mutex> lock(sim_mutex_);
+      feedback->current_position = static_cast<int32_t>(std::lround(sim_position_));
+      feedback->current_velocity = static_cast<float>(sim_velocity_);
+    } else {
+      const auto fb = driver_->feedback();
+      feedback->current_position = mirror() * fb.position;
+      feedback->current_velocity = static_cast<float>(mirror() * fb.velocity);
+    }
+    feedback->remaining_steps = st.target - feedback->current_position;
+    goal_handle->publish_feedback(feedback);
+    rate.sleep();
+  }
+}
+
+bool SilentStepperDriverWrapper::start_move(
+  bool absolute, int32_t steps, uint16_t max_velocity, std::string * error)
+{
+  if (!hw_simulation_) {
+    // The driver works in the motor frame.
+    return driver_->start_move(absolute, mirror() * steps, max_velocity, error);
+  }
+  std::lock_guard<std::mutex> lock(sim_mutex_);
+  if (sim_move_.state == MoveStatus::State::Moving) {
+    *error = "another move is still running";
+    return false;
+  }
+  if (absolute && !sim_referenced_) {
+    *error = "absolute move needs a reference: call zero_position first";
+    return false;
+  }
+  const auto start = static_cast<int32_t>(std::lround(sim_position_));
+  sim_move_ = MoveStatus{};
+  sim_move_.target = absolute ? steps : start + steps;
+  sim_move_velocity_ = max_velocity == 0 ? config_.max_step_vel :
+    std::min<int>(max_velocity, config_.max_step_vel);
+  if (sim_move_.target == start) {
+    sim_move_.state = MoveStatus::State::Reached;
+    sim_move_.final_position = start;
+  } else {
+    sim_move_.state = MoveStatus::State::Moving;
+  }
+  return true;
+}
+
+void SilentStepperDriverWrapper::cancel_move(const std::string & reason)
+{
+  if (!hw_simulation_) {
+    driver_->cancel_move(reason);
+    return;
+  }
+  std::lock_guard<std::mutex> lock(sim_mutex_);
+  if (sim_move_.state == MoveStatus::State::Moving) {
+    sim_move_.state = MoveStatus::State::Aborted;
+    sim_move_.reason = reason;
+    sim_move_.final_position = static_cast<int32_t>(std::lround(sim_position_));
+    sim_velocity_ = 0;
+  }
+}
+
+MoveStatus SilentStepperDriverWrapper::move_status()
+{
+  if (!hw_simulation_) {
+    // Back to the actuator frame.
+    MoveStatus st = driver_->move_status();
+    st.target *= mirror();
+    st.final_position *= mirror();
+    return st;
+  }
+  std::lock_guard<std::mutex> lock(sim_mutex_);
+  return sim_move_;
+}
+
+bool SilentStepperDriverWrapper::zero_position(std::string * error)
+{
+  if (!hw_simulation_) {
+    return driver_->set_reference(0, error);
+  }
+  std::lock_guard<std::mutex> lock(sim_mutex_);
+  if (sim_move_.state == MoveStatus::State::Moving) {
+    *error = "cannot set the reference while moving";
+    return false;
+  }
+  sim_position_ = 0.0;
+  sim_referenced_ = true;
+  return true;
+}
+
+void SilentStepperDriverWrapper::sim_tick(double dt)
+{
+  std::lock_guard<std::mutex> lock(sim_mutex_);
+  if (!position_mode_) {
+    sim_position_ += sim_velocity_ * dt;
+    return;
+  }
+  if (sim_move_.state != MoveStatus::State::Moving) {
+    sim_velocity_ = 0;
+    return;
+  }
+  const double remaining = sim_move_.target - sim_position_;
+  const double step = sim_move_velocity_ * dt;
+  if (std::abs(remaining) <= step) {
+    sim_position_ = sim_move_.target;
+    sim_velocity_ = 0;
+    sim_move_.state = MoveStatus::State::Reached;
+    sim_move_.final_position = sim_move_.target;
+  } else {
+    const int dir = remaining > 0 ? 1 : -1;
+    sim_position_ += dir * step;
+    sim_velocity_ = static_cast<int32_t>(dir * sim_move_velocity_);
+  }
+}
+
+// --- both modes ------------------------------------------------------------------------
 
 void SilentStepperDriverWrapper::timer_callback()
 {
@@ -234,6 +507,7 @@ void SilentStepperDriverWrapper::timer_callback()
       node_->get_logger(), "[%s] No velocity command for %.2f s, stopping the wheel",
       wheel_name_.c_str(), watchdog_.timeout());
     if (hw_simulation_) {
+      std::lock_guard<std::mutex> lock(sim_mutex_);
       sim_velocity_ = 0;
     } else {
       driver_->command_velocity(0.0);
@@ -245,7 +519,8 @@ void SilentStepperDriverWrapper::timer_callback()
   msg.header.frame_id = wheel_name_;
 
   if (hw_simulation_) {
-    sim_position_ += sim_velocity_ * dt;
+    sim_tick(dt);
+    std::lock_guard<std::mutex> lock(sim_mutex_);
     msg.current_velocity = static_cast<float>(sim_velocity_);
     msg.current_position = static_cast<int32_t>(std::lround(sim_position_));
     feedback_pub_->publish(msg);

@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>cmeresearch_stepper_driver</name>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <description>ROS 2 driver for the TinkerForge Silent Stepper Bricklet 2.0 (one node per wheel).</description>
   <maintainer email="info@cme-robotics.com">Christian Ehrmann</maintainer>
   <!-- Driver code; the vendored TinkerForge bindings (src/tinkerforge, include/tinkerforge) are CC0-1.0. -->
@@ -15,6 +15,8 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>std_srvs</depend>
   <depend>rcl_interfaces</depend>
   <depend>std_msgs</depend>
   <depend>cmeresearch_msgs</depend>
@@ -26,6 +28,7 @@
   <test_depend>launch_testing_ament_cmake</test_depend>
   <test_depend>launch_testing</test_depend>
   <test_depend>rclpy</test_depend>
+  <test_depend>action_msgs</test_depend>
   <test_depend>python3-pytest</test_depend>
 
   <export>
