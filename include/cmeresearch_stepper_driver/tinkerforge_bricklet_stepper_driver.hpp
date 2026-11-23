@@ -49,6 +49,16 @@ enum class DriverStatus
 
 const char * to_string(DriverStatus status);
 
+/// State of a position move (control_mode "position").
+struct MoveStatus
+{
+  enum class State { Idle, Moving, Reached, Aborted };
+  State state = State::Idle;
+  int32_t target = 0;          ///< expected end position (motor frame, microsteps)
+  int32_t final_position = 0;  ///< position reported when the move ended
+  std::string reason;          ///< why it was aborted
+};
+
 /// Drives one TinkerForge SilentStepper Bricklet 2.0 in continuous-drive mode.
 ///
 /// Threading: BrickletIo callbacks (handle_*) run on the bindings' callback
@@ -90,6 +100,21 @@ public:
   /// velocity is 0, so consumers never integrate frozen values.
   StepperFeedback feedback() const;
 
+  // --- position control (motor frame, microsteps) -------------------------------
+  /// Start a move: by `steps` (relative) or to counter position `steps`
+  /// (absolute; requires is_referenced()). `max_velocity` 0 uses max_step_vel.
+  /// Returns false and sets `error` if the move cannot start (not ready,
+  /// another move running, not referenced, bricklet rejected it).
+  bool start_move(bool absolute, int32_t steps, uint16_t max_velocity, std::string * error);
+  /// Ramp down and mark the running move as aborted with `reason`.
+  void cancel_move(const std::string & reason);
+  MoveStatus move_status() const;
+  /// Define the current position as `position` (e.g. 0 at the home position).
+  bool set_reference(int32_t position, std::string * error);
+  /// True once set_reference() succeeded since the bricklet was (re)configured
+  /// — a bricklet reset restarts its step counter at 0.
+  bool is_referenced() const {return referenced_.load();}
+
   // --- BrickletIo event handlers (public for tests) ---------------------------
   void handle_connected(bool auto_reconnect);
   void handle_disconnected();
@@ -98,9 +123,11 @@ public:
     uint16_t velocity, int32_t position, int32_t remaining_steps,
     uint16_t input_voltage_mv, uint16_t current_consumption_ma);
   void handle_new_state(uint8_t state_new, uint8_t state_previous);
+  void handle_position_reached(int32_t position);
 
 private:
   void log(LogLevel level, const std::string & msg) const;
+  void abort_move(const std::string & reason);
   void connect_loop();
   void configure_device_locked(const std::string & uid);
   void ensure_enabled_locked();
@@ -136,6 +163,11 @@ private:
   StepperFeedback feedback_;
   bool have_position_ = false;
   Clock::time_point last_data_{};
+
+  // Position move. Lock order: device_mutex_ before move_mutex_.
+  mutable std::mutex move_mutex_;
+  MoveStatus move_;
+  std::atomic<bool> referenced_{false};
 };
 
 }  // namespace cmeresearch_stepper_driver

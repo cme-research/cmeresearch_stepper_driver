@@ -55,6 +55,8 @@ struct BrickletCallbacks
       uint16_t velocity, int32_t position, int32_t remaining_steps,
       uint16_t input_voltage_mv, uint16_t current_consumption_ma)> on_all_data;
   std::function<void(uint8_t state_new, uint8_t state_previous)> on_new_state;
+  /// A move started with set_steps / set_target_position ended at `position`.
+  std::function<void(int32_t position)> on_position_reached;
 };
 
 /// Operations StepperDriver needs from brickd / one SilentStepper V2 bricklet.
@@ -86,6 +88,14 @@ public:
   virtual int drive(int direction) = 0;
   virtual int set_max_velocity(uint16_t microsteps_per_s) = 0;
   virtual int stop() = 0;
+
+  // position control (motor frame, microsteps)
+  /// Move by `steps` from the current position.
+  virtual int set_steps(int32_t steps) = 0;
+  /// Move to the absolute counter position `position`.
+  virtual int set_target_position(int32_t position) = 0;
+  /// Redefine the current counter position (referencing / zeroing).
+  virtual int set_current_position(int32_t position) = 0;
 };
 
 /// BrickletIo backed by the vendored TinkerForge C bindings.

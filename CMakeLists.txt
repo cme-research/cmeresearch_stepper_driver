@@ -8,6 +8,8 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(cmeresearch_msgs REQUIRED)
@@ -45,7 +47,9 @@ target_compile_options(stepper_driver_ros PRIVATE ${WARNINGS})
 target_link_libraries(stepper_driver_ros PUBLIC
   tinkerforge_io
   rclcpp::rclcpp
+  rclcpp_action::rclcpp_action
   ${rcl_interfaces_TARGETS}
+  ${std_srvs_TARGETS}
   ${std_msgs_TARGETS}
   ${cmeresearch_msgs_TARGETS})
 
@@ -71,6 +75,8 @@ if(BUILD_TESTING)
   # Node-level test: runs stepper_driver_node in hw_simulation mode.
   find_package(launch_testing_ament_cmake REQUIRED)
   add_launch_test(test/test_node_simulation.launch.py TIMEOUT 120)
+  # control_mode "position": MoveSteps action in hw_simulation.
+  add_launch_test(test/test_position_action.launch.py TIMEOUT 180)
 endif()
 
 ament_package()

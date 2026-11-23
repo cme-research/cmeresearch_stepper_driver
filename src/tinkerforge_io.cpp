@@ -50,6 +50,10 @@ constexpr uint8_t kAcknowledgedSetters[] = {
   SILENT_STEPPER_V2_FUNCTION_SET_BASIC_CONFIGURATION,
   SILENT_STEPPER_V2_FUNCTION_SET_STEALTH_CONFIGURATION,
   SILENT_STEPPER_V2_FUNCTION_SET_ENABLED,
+  // Position moves are rare and must not fail silently.
+  SILENT_STEPPER_V2_FUNCTION_SET_STEPS,
+  SILENT_STEPPER_V2_FUNCTION_SET_TARGET_POSITION,
+  SILENT_STEPPER_V2_FUNCTION_SET_CURRENT_POSITION,
 };
 
 class TinkerforgeIo : public BrickletIo
@@ -96,6 +100,9 @@ public:
       &device_, SILENT_STEPPER_V2_CALLBACK_ALL_DATA, as_callback(&on_all_data), this);
     silent_stepper_v2_register_callback(
       &device_, SILENT_STEPPER_V2_CALLBACK_NEW_STATE, as_callback(&on_new_state), this);
+    silent_stepper_v2_register_callback(
+      &device_, SILENT_STEPPER_V2_CALLBACK_POSITION_REACHED, as_callback(&on_position_reached),
+      this);
   }
 
   void destroy_device() override
@@ -145,7 +152,27 @@ public:
 
   int stop() override {return silent_stepper_v2_stop(&device_);}
 
+  int set_steps(int32_t steps) override {return silent_stepper_v2_set_steps(&device_, steps);}
+
+  int set_target_position(int32_t position) override
+  {
+    return silent_stepper_v2_set_target_position(&device_, position);
+  }
+
+  int set_current_position(int32_t position) override
+  {
+    return silent_stepper_v2_set_current_position(&device_, position);
+  }
+
 private:
+  static void on_position_reached(int32_t position, void * user_data)
+  {
+    auto * self = static_cast<TinkerforgeIo *>(user_data);
+    if (self->callbacks_.on_position_reached) {
+      self->callbacks_.on_position_reached(position);
+    }
+  }
+
   static void on_connected(uint8_t reason, void * user_data)
   {
     auto * self = static_cast<TinkerforgeIo *>(user_data);

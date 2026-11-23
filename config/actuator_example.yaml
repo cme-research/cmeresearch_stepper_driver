@@ -1,0 +1,30 @@
+# Example: one SilentStepper V2 driving a stand-alone actuator (lift, turntable,
+# flap, ...) in control_mode "position". Load with
+#   ros2 run cmeresearch_stepper_driver stepper_driver_node \
+#     --ros-args -r __node:=lift -r __ns:=/actuators \
+#     --params-file $(ros2 pkg prefix --share cmeresearch_stepper_driver)/config/actuator_example.yaml
+#
+# Then reference and move (positions in microsteps; here 200 x 8 = 1600 per motor revolution):
+#   ros2 service call /actuators/zero_position std_srvs/srv/Trigger
+#   ros2 action send_goal --feedback /actuators/move_steps cmeresearch_msgs/action/MoveSteps \
+#     "{mode: 1, steps: 16000, max_velocity: 3000}"     # absolute: 10 motor revolutions
+
+/**/lift:   # any namespace
+  ros__parameters:
+    control_mode: position
+    wheel_name: lift            # log prefix / feedback frame_id
+    bricklet_host: localhost
+    bricklet_port: 4223
+    brick_position: e           # a free port on the brick
+    step_resolution: 8
+    steps_per_revolution: 200
+    max_step_vel: 4000          # also caps max_velocity of every goal
+    acceleration: 4000
+    deceleration: 4000
+    mirror_direction: false
+    # Hold the actuator at standstill (do not freewheel under load).
+    standstill_current: 400
+    motor_run_current: 800
+    freewheel_mode: 0
+    # Abort moves when the robot goes into emergency stop ("" disables).
+    robot_state_topic: /robot_state

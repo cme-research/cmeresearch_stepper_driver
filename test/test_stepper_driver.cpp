@@ -30,6 +30,7 @@ struct FakeState
   std::vector<std::string> calls;
   std::vector<int> connect_results;   // consumed per connect(); empty -> E_OK
   int configure_result = 0;
+  int move_result = 0;
   std::atomic<int> connect_calls{0};
   BrickletCallbacks callbacks;
 
@@ -87,6 +88,17 @@ public:
   int drive(int dir) override {s_->record("drive:" + std::to_string(dir)); return 0;}
   int set_max_velocity(uint16_t v) override {s_->record("vel:" + std::to_string(v)); return 0;}
   int stop() override {s_->record("stop"); return 0;}
+  int set_steps(int32_t steps) override
+  {
+    s_->record("steps:" + std::to_string(steps));
+    return s_->move_result;
+  }
+  int set_target_position(int32_t p) override
+  {
+    s_->record("target:" + std::to_string(p));
+    return s_->move_result;
+  }
+  int set_current_position(int32_t p) override {s_->record("set_pos:" + std::to_string(p)); return 0;}
 
 private:
   std::shared_ptr<FakeState> s_;
@@ -374,4 +386,109 @@ TEST_F(StepperDriverTest, ShutdownStopsAndDisablesTheMotor)
   driver_.reset();
   EXPECT_EQ(
     state->take(), (std::vector<std::string>{"stop", "enabled:0", "disconnect", "destroy"}));
+}
+
+// --- position control ----------------------------------------------------------------
+
+TEST_F(StepperDriverTest, RelativeMoveUsesSetStepsAndFinishesOnPositionReached)
+{
+  make_ready();
+  driver_->handle_all_data(0, 1000, 0, 24000, 0);
+  std::string err;
+  ASSERT_TRUE(driver_->start_move(false, 500, 2000, &err)) << err;
+  EXPECT_EQ(
+    state_->take(), (std::vector<std::string>{"enabled:0", "enabled:1", "vel:2000", "steps:500"}));
+  auto st = driver_->move_status();
+  EXPECT_EQ(st.state, MoveStatus::State::Moving);
+  EXPECT_EQ(st.target, 1500);
+
+  std::string err2;
+  EXPECT_FALSE(driver_->start_move(false, 10, 0, &err2)) << "second move while moving";
+  EXPECT_NE(err2.find("still running"), std::string::npos);
+
+  driver_->handle_position_reached(1500);
+  st = driver_->move_status();
+  EXPECT_EQ(st.state, MoveStatus::State::Reached);
+  EXPECT_EQ(st.final_position, 1500);
+}
+
+TEST_F(StepperDriverTest, VelocityIsLimitedToMaxStepVel)
+{
+  make_ready();
+  ASSERT_TRUE(driver_->start_move(false, 100, 0, nullptr));       // 0 -> max_step_vel
+  EXPECT_TRUE(state_->called("vel:8000"));
+  driver_->handle_position_reached(100);
+  state_->take();
+  ASSERT_TRUE(driver_->start_move(false, 100, 60000, nullptr));   // capped
+  EXPECT_TRUE(state_->called("vel:8000"));
+}
+
+TEST_F(StepperDriverTest, AbsoluteMoveNeedsReference)
+{
+  make_ready();
+  std::string err;
+  EXPECT_FALSE(driver_->start_move(true, 2000, 0, &err));
+  EXPECT_NE(err.find("zero_position"), std::string::npos);
+
+  ASSERT_TRUE(driver_->set_reference(0, &err)) << err;
+  EXPECT_TRUE(state_->called("set_pos:0"));
+  EXPECT_TRUE(driver_->is_referenced());
+  ASSERT_TRUE(driver_->start_move(true, 2000, 0, &err)) << err;
+  EXPECT_TRUE(state_->called("target:2000"));
+  EXPECT_EQ(driver_->move_status().target, 2000);
+}
+
+TEST_F(StepperDriverTest, ReconfigurationClearsReferenceAndAbortsMove)
+{
+  make_ready();
+  ASSERT_TRUE(driver_->set_reference(0, nullptr));
+  ASSERT_TRUE(driver_->start_move(true, 2000, 0, nullptr));
+  // Bricklet reset -> enumerated as CONNECTED -> reconfigured; counter restarts at 0.
+  driver_->handle_enumerate(stepper_at('b', "Xa1", EnumerateInfo::Type::Connected));
+  EXPECT_EQ(driver_->move_status().state, MoveStatus::State::Aborted);
+  EXPECT_FALSE(driver_->is_referenced());
+}
+
+TEST_F(StepperDriverTest, DisconnectAbortsMove)
+{
+  make_ready();
+  ASSERT_TRUE(driver_->start_move(false, 5000, 0, nullptr));
+  driver_->handle_disconnected();
+  const auto st = driver_->move_status();
+  EXPECT_EQ(st.state, MoveStatus::State::Aborted);
+  EXPECT_NE(st.reason.find("brickd"), std::string::npos);
+}
+
+TEST_F(StepperDriverTest, CancelRampsDownAndAborts)
+{
+  make_ready();
+  ASSERT_TRUE(driver_->start_move(false, 5000, 0, nullptr));
+  state_->take();
+  driver_->cancel_move("canceled");
+  EXPECT_EQ(state_->take(), (std::vector<std::string>{"stop"}));
+  EXPECT_EQ(driver_->move_status().state, MoveStatus::State::Aborted);
+  // A late POSITION_REACHED must not turn the aborted move into a success.
+  driver_->handle_position_reached(5000);
+  EXPECT_EQ(driver_->move_status().state, MoveStatus::State::Aborted);
+}
+
+TEST_F(StepperDriverTest, MoveRefusedWhenNotReadyOrRejected)
+{
+  make_driver();   // not connected
+  std::string err;
+  EXPECT_FALSE(driver_->start_move(false, 10, 0, &err));
+  EXPECT_NE(err.find("not ready"), std::string::npos);
+
+  make_ready();
+  state_->move_result = -9;
+  EXPECT_FALSE(driver_->start_move(false, 10, 0, &err));
+  EXPECT_NE(err.find("rejected"), std::string::npos);
+  EXPECT_EQ(driver_->move_status().state, MoveStatus::State::Idle);
+}
+
+TEST_F(StepperDriverTest, ZeroLengthMoveIsReachedImmediately)
+{
+  make_ready();
+  ASSERT_TRUE(driver_->start_move(false, 0, 0, nullptr));
+  EXPECT_EQ(driver_->move_status().state, MoveStatus::State::Reached);
 }
