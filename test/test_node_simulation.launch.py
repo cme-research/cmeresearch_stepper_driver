@@ -139,8 +139,41 @@ class TestSimulatedDriver(unittest.TestCase):
         self.command_and_wait(1.0)
         self.cmd_pub.publish(TinkerStepperCommand(velocity=float('nan')))
         n = len(self.feedback)
-        self.spin_until(lambda: len(self.feedback) >= n + 3)
+        # Stay well inside the 0.5 s command timeout.
+        self.spin_until(lambda: len(self.feedback) >= n + 2)
         self.assertEqual(self.feedback[-1].current_velocity, 509.0)
+
+    def test_wheel_stops_when_commands_stop(self):
+        """Command watchdog: no command for 0.5 s -> standstill."""
+        self.command_and_wait(1.0)
+        t_last_command = time.monotonic()
+        stopped = self.spin_until(
+            lambda: bool(self.feedback) and self.feedback[-1].current_velocity == 0.0,
+            timeout=3.0)
+        elapsed = time.monotonic() - t_last_command
+        self.assertTrue(stopped, 'wheel kept turning without commands')
+        self.assertGreaterEqual(elapsed, 0.4, 'stopped before the timeout')
+        self.assertLess(elapsed, 1.0, 'command_timeout 0.5 s not honoured')
+
+    def test_position_is_integrated_in_simulation(self):
+        self.command_and_wait(1.0)
+        p0 = self.feedback[-1].current_position
+        self.command_and_wait(1.0)
+        n = len(self.feedback)
+        self.spin_until(lambda: len(self.feedback) >= n + 2)
+        self.assertGreater(self.feedback[-1].current_position, p0)
+
+    def test_parameters_are_read_only(self):
+        from rcl_interfaces.srv import SetParameters
+        from rclpy.parameter import Parameter
+        client = self.node.create_client(SetParameters, '/sim/stepper_bricklet/set_parameters')
+        self.assertTrue(client.wait_for_service(timeout_sec=10.0))
+        req = SetParameters.Request(
+            parameters=[Parameter('max_step_vel', Parameter.Type.INTEGER, 100).to_parameter_msg()])
+        future = client.call_async(req)
+        self.assertTrue(self.spin_until(future.done))
+        self.assertFalse(future.result().results[0].successful,
+                         'runtime parameter change must be rejected, it would have no effect')
 
 
 @launch_testing.post_shutdown_test()
