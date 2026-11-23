@@ -46,7 +46,7 @@ Feedback fields:
 | `initialized` | Bricklet configured and streaming data — ready to drive. |
 | `low_voltage` | Supply below `under_voltage_mv`. The node only reports it; `cmeresearch_robot_state` triggers the emergency stop. |
 | `idle` | Ready again after a low-voltage phase (the driver stage is re-armed on the next command). |
-| `disconnected` | Was ready, but brickd/bricklet is gone or no data for `feedback_timeout`. Reconnects automatically; then back to `initialized`. |
+| `disconnected` | Was ready, but brickd/bricklet is gone or no data for `feedback_timeout`. Reconnects automatically; then back to `initialized`. `cmeresearch_robot_state` triggers an emergency stop; after a reset it waits until the driver is `initialized` again. |
 | `error` | Invalid parameters (node exits) or the bricklet rejected the configuration (retried after the next reconnect / bricklet reset). |
 
 `cmeresearch_robot_state` treats `initialized` and `idle` as ready, so the robot
