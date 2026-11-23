@@ -15,23 +15,26 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <cstdlib>
+
 #include "cmeresearch_stepper_driver/stepper_driver_ros_wrapper.hpp"
 
-int main(int argc, char **argv)
+int main(int argc, char ** argv)
 {
-    rclcpp::init(argc, argv);
-    rclcpp::Node::SharedPtr node = rclcpp::Node::make_shared("stepper_bricklet");
-    bool myparam = true;
-    SilentStepperDriverWrapper stepper(node, myparam);
-
-    if (!stepper.initialize()) {
-        RCLCPP_ERROR(node->get_logger(), "Failed to initialize SilentStepperDriverWrapper");
-        return EXIT_FAILURE;
+  rclcpp::init(argc, argv);
+  int exit_code = EXIT_SUCCESS;
+  {
+    auto node = rclcpp::Node::make_shared("stepper_bricklet");
+    cmeresearch_stepper_driver::SilentStepperDriverWrapper stepper(node);
+    if (stepper.initialize()) {
+      rclcpp::spin(node);
+    } else {
+      RCLCPP_ERROR(node->get_logger(), "Failed to initialize the stepper driver");
+      exit_code = EXIT_FAILURE;
     }
-
-
-
-    rclcpp::spin(node);
-    rclcpp::shutdown();
-    return EXIT_SUCCESS;
+    // The wrapper (and with it the hardware driver) is destroyed here, while
+    // rclcpp is still up, so the motor is stopped before shutdown completes.
+  }
+  rclcpp::shutdown();
+  return exit_code;
 }

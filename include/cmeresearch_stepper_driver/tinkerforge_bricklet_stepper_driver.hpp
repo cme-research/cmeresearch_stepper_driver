@@ -15,166 +15,149 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#ifndef TINKERFORGE_BRICKLET_STEPPER_DRIVER_H
-#define TINKERFORGE_BRICKLET_STEPPER_DRIVER_H
+#ifndef CMERESEARCH_STEPPER_DRIVER__TINKERFORGE_BRICKLET_STEPPER_DRIVER_HPP_
+#define CMERESEARCH_STEPPER_DRIVER__TINKERFORGE_BRICKLET_STEPPER_DRIVER_HPP_
 
-#define IPCON_EXPOSE_MILLISLEEP
-
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <mutex>
 #include <string>
-#include <stdio.h>
-#include <chrono>
-#include <iostream>
-#include <thread>
-#include <cmath>
 
-#include "../tinkerforge/ip_connection.h"
-#include "../tinkerforge/bricklet_silent_stepper_v2.h"
+#include "tinkerforge/ip_connection.h"
+#include "tinkerforge/bricklet_silent_stepper_v2.h"
 
+namespace cmeresearch_stepper_driver
+{
 
-class StepperDriver {
-    public:
-      // constructor
-      StepperDriver(
-          std::string bricklet_host,
-          int bricklet_port,
-          std::string brick_position,
-          int step_resolution,
-          bool interpolation,
-          int acceleration,
-          int deceleration,
-          int steps_per_revolution,
-          double gear_ratio,
-          int max_step_vel,
-          int standstill_current = 200,
-          int motor_run_current = 800,
-          int standstill_delay_time = 300,
-          int power_down_time = 5000,
-          int stealth_threshold = 1000,
-          int coolstep_threshold = 1001,
-          int classic_threshold = 2000,
-          bool high_velocity_chopper_mode = false,
-          // Freewheel mode governs the standstill behaviour when standstill_current
-          // is 0 (see SilentStepper V2 set_stealth_configuration):
-          //   0 = Normal, 1 = Freewheeling, 2 = Coil short LS, 3 = Coil short HS.
-          // Default 0 preserves the previous behaviour (firmware default).
-          int freewheel_mode = 0
-      );
-      // destructor
-      ~StepperDriver()
-      {
-		  shutdownStepper();
-          ipcon_destroy(&ipcon_);
-      }
-      // init
-      int init();
-      void run();
-      void drive_forward();
-      void drive_backward();
-      void stop();
-      // parameters for the driver state
+/// Static configuration of one SilentStepper V2 bricklet / wheel.
+struct StepperConfig
+{
+  std::string host = "localhost";
+  int port = 4223;
+  /// Bricklet port letter on the brick ('a'..'h', case-insensitive).
+  char brick_position = 'a';
 
+  /// Microsteps per full step: 1, 2, 4, ..., 256.
+  int microsteps = 8;
+  bool interpolation = true;
+  int steps_per_revolution = 200;
+  int acceleration = 1000;    // steps/s^2
+  int deceleration = 1000;    // steps/s^2
+  int max_step_vel = 1000;    // microsteps/s
 
-      int get_current_velocity();
-      int get_current_position();
-      int get_input_voltage();       // mV, as reported by the bricklet
-      int get_current_consumption(); // mA, as reported by the bricklet
-      int get_new_state();
-      int get_previous_state();
-      bool get_under_voltage_triggered();
-      bool consume_voltage_recovered();
-      void set_velocity(double cmd_vel);
+  // Motor current / chopper configuration (see set_basic_configuration).
+  int standstill_current = 200;
+  int motor_run_current = 800;
+  int standstill_delay_time = 300;
+  int power_down_time = 5000;
+  int stealth_threshold = 400;
+  int coolstep_threshold = 500;
+  int classic_threshold = 600;
+  bool high_velocity_chopper_mode = false;
+  /// Standstill behaviour when standstill_current == 0:
+  /// 0 = Normal, 1 = Freewheeling, 2 = Coil short LS, 3 = Coil short HS.
+  int freewheel_mode = 0;
 
-
-
-    private:
-        IPConnection ipcon_;
-        SilentStepperV2 brickletStepperV2_;
-
-        // parameters set by launch file
-        int step_resolution_;
-        int steps_per_revolution_;
-        double gear_ratio_;
-        int max_step_vel_;
-        int acceleration_;
-        int deceleration_;
-        int wheel_name_;
-        std::string brick_position_;
-        int bricklet_port_;
-        std::string bricklet_host_;
-        bool stepper_enabled_;
-        bool interpolation_;
-        bool bricklet_is_configured_;
-        bool under_voltage_triggered_;
-        bool reset_after_under_voltage_triggered_;
-        // parameters for motor (hopefully they don't need to be parameters to be changed from outside
-        int standstill_current_;
-        int motor_run_current_;
-        int standstill_delay_time_;
-        int power_down_time_;
-        int stealth_threshold_;
-        int coolstep_threshold_;
-        int classic_threshold_;
-        bool high_velocity_chopper_mode_;
-        int freewheel_mode_;
-
-
-        // hardware info coming from the bricklet
-        std::string hw_bricklet_uid_;
-        std::string hw_bricklet_connected_uid_;
-        char hw_bricklet_position_;
-        uint8_t hw_bricklet_hardware_version_[3];
-        uint8_t hw_bricklet_firmware_version_[3];
-        uint16_t hw_bricklet_device_identifier_;
-        uint8_t hw_bricklet_enumeration_type_;
-
-        // variables that represent the state of the stepper motor
-        int current_velocity_;
-  		int current_position_;
-  		int remaining_steps_;
-  		int input_voltage_;
-  		int current_consumption_;
-        int position_;
-        /*
-			SILENT_STEPPER_V2_STATE_STOP = 1
-			SILENT_STEPPER_V2_STATE_ACCELERATION = 2
-			SILENT_STEPPER_V2_STATE_RUN = 3
-			SILENT_STEPPER_V2_STATE_DEACCELERATION = 4
-			SILENT_STEPPER_V2_STATE_DIRECTION_CHANGE_TO_FORWARD = 5
-			SILENT_STEPPER_V2_STATE_DIRECTION_CHANGE_TO_BACKWARD = 6
-         */
-        int state_new_;
-        /*
-			SILENT_STEPPER_V2_STATE_STOP = 1
-			SILENT_STEPPER_V2_STATE_ACCELERATION = 2
-			SILENT_STEPPER_V2_STATE_RUN = 3
-			SILENT_STEPPER_V2_STATE_DEACCELERATION = 4
-			SILENT_STEPPER_V2_STATE_DIRECTION_CHANGE_TO_FORWARD = 5
-			SILENT_STEPPER_V2_STATE_DIRECTION_CHANGE_TO_BACKWARD = 6
-         */
-        int state_previous_;
-    	void shutdownStepper();
-		void stepperEnabled();
-		void stepperDisabled();
-
-
-        static void cb_enumerate(const char *uid, const char *connected_uid,
-                  char position, uint8_t hardware_version[3],
-                  uint8_t firmware_version[3], uint16_t device_identifier,
-                  uint8_t enumeration_type, void *user_data);
-        // try to do this without static function:
-        static void cb_connected(uint8_t reason, void *user_data);
-        static void cb_all_data(uint16_t current_velocity,
-                                int32_t current_position,
-                                int32_t remaining_steps,
-                                uint16_t input_voltage,
-                                uint16_t current_consumption,
-                                void *user_data);
-        static void cb_position_reached(int32_t position, void *user_data);
-        static void cb_new_state(uint8_t state_new, uint8_t state_previous, void *user_data);
-
-        bool ret_enabled_;
+  /// Input voltage below which the supply is considered too low [mV].
+  int under_voltage_mv = 17000;
+  /// The low-voltage state clears at under_voltage_mv + this value [mV].
+  int under_voltage_hysteresis_mv = 500;
 };
 
+/// Snapshot of the most recent data reported by the bricklet.
+struct StepperFeedback
+{
+  /// Signed motor-shaft velocity [microsteps/s]. The bricklet only reports the
+  /// magnitude; the sign is derived from the direction the position moves.
+  int32_t velocity = 0;
+  int32_t position = 0;          // microsteps, motor frame
+  int32_t remaining_steps = 0;
+  int32_t input_voltage_mv = 0;
+  int32_t current_consumption_ma = 0;
+  uint8_t state = 0;             // SILENT_STEPPER_V2_STATE_*, 0 = unknown
+  uint8_t previous_state = 0;
+  bool under_voltage = false;
+};
 
+enum class LogLevel { Debug, Info, Warn, Error };
+using LogFn = std::function<void(LogLevel, const std::string &)>;
 
-#endif //TINKERFORGE_BRICKLET_STEPPER_DRIVER_H
+/// Drives one TinkerForge SilentStepper Bricklet 2.0 in continuous-drive mode.
+///
+/// Threading: the TinkerForge binding invokes the static cb_* callbacks on its
+/// own callback thread, while the public methods are called from the ROS
+/// executor. Device lifetime/configuration is guarded by device_mutex_, the
+/// feedback snapshot by feedback_mutex_, and single-word flags are atomics.
+class StepperDriver
+{
+public:
+  explicit StepperDriver(StepperConfig config, LogFn log = nullptr);
+  ~StepperDriver();
+
+  StepperDriver(const StepperDriver &) = delete;
+  StepperDriver & operator=(const StepperDriver &) = delete;
+
+  /// Connect to brickd. The bricklet is configured asynchronously once it is
+  /// enumerated (and again after every reconnect / bricklet reset).
+  /// Returns 0 on success or the negative TinkerForge E_* error code.
+  int connect();
+
+  /// True once the matching bricklet was found and configured.
+  bool is_configured() const { return configured_.load(); }
+
+  /// Command a signed motor-shaft velocity [rad/s] (motor frame, i.e. after
+  /// gear ratio and direction mirroring). 0 ramps down to standstill.
+  void command_velocity(double motor_rad_s);
+
+  /// Ramp the motor down to standstill.
+  void stop();
+
+  StepperFeedback feedback() const;
+
+  /// Returns true exactly once after the supply recovered from under-voltage.
+  bool consume_voltage_recovered() { return voltage_recovered_event_.exchange(false); }
+
+private:
+  void log(LogLevel level, const std::string & msg) const;
+  void configure_device_locked(const char * uid);
+  void ensure_enabled_locked();
+
+  static void cb_connected(uint8_t reason, void * user_data);
+  static void cb_enumerate(
+    const char * uid, const char * connected_uid, char position,
+    uint8_t hardware_version[3], uint8_t firmware_version[3],
+    uint16_t device_identifier, uint8_t enumeration_type, void * user_data);
+  static void cb_all_data(
+    uint16_t current_velocity, int32_t current_position, int32_t remaining_steps,
+    uint16_t input_voltage, uint16_t current_consumption, void * user_data);
+  static void cb_new_state(uint8_t state_new, uint8_t state_previous, void * user_data);
+
+  const StepperConfig config_;
+  const uint8_t step_resolution_register_;
+  LogFn log_;
+
+  IPConnection ipcon_;
+  SilentStepperV2 device_;
+
+  // Guards device_ creation/configuration and the command path.
+  mutable std::mutex device_mutex_;
+  bool device_created_ = false;     // device_ holds a live handle
+  std::string device_uid_;
+  bool enabled_ = false;            // driver stage enabled by us since (re)configure
+
+  std::atomic<bool> configured_{false};
+  // Last direction sent to the bricklet (+1/-1); read by cb_all_data as the
+  // sign fallback while the position is not changing.
+  std::atomic<int> commanded_direction_{1};
+  std::atomic<bool> rearm_pending_{false};          // consumed by the command path
+  std::atomic<bool> voltage_recovered_event_{false};  // consumed by consume_voltage_recovered()
+
+  mutable std::mutex feedback_mutex_;
+  StepperFeedback feedback_;
+  bool have_position_ = false;
+};
+
+}  // namespace cmeresearch_stepper_driver
+
+#endif  // CMERESEARCH_STEPPER_DRIVER__TINKERFORGE_BRICKLET_STEPPER_DRIVER_HPP_
