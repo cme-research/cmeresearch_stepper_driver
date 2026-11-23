@@ -84,6 +84,44 @@ inline bool update_under_voltage(bool latched, int input_mv, int trip_mv, int hy
   return input_mv < trip_mv + std::max(hysteresis_mv, 0);
 }
 
+/// Stops a wheel when velocity commands stop arriving.
+///
+/// The bricklet runs in continuous-drive mode, so without this the last
+/// non-zero command would keep the wheel turning forever if the controller
+/// (cmexa_base / ros2_control) dies. Times are seconds on a monotonic clock.
+class CommandWatchdog
+{
+public:
+  /// timeout_s <= 0 disables the watchdog.
+  explicit CommandWatchdog(double timeout_s)
+  : timeout_s_(timeout_s) {}
+
+  /// Record a received command. Only a non-zero command arms the watchdog.
+  void feed(double now_s, bool moving)
+  {
+    last_s_ = now_s;
+    armed_ = moving;
+  }
+
+  /// True exactly once when an armed watchdog runs out; the caller then
+  /// commands standstill. Re-armed by the next non-zero command.
+  bool expired(double now_s)
+  {
+    if (timeout_s_ <= 0.0 || !armed_ || now_s - last_s_ <= timeout_s_) {
+      return false;
+    }
+    armed_ = false;
+    return true;
+  }
+
+  double timeout() const {return timeout_s_;}
+
+private:
+  double timeout_s_;
+  double last_s_ = 0.0;
+  bool armed_ = false;
+};
+
 }  // namespace cmeresearch_stepper_driver
 
 #endif  // CMERESEARCH_STEPPER_DRIVER__STEPPER_MATH_HPP_

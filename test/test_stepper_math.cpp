@@ -86,3 +86,38 @@ TEST(UnderVoltage, NegativeHysteresisTreatedAsZero)
 {
   EXPECT_FALSE(update_under_voltage(true, 17000, 17000, -100));
 }
+
+TEST(CommandWatchdog, FiresOnceAfterTimeoutWhileMoving)
+{
+  CommandWatchdog wd(0.5);
+  wd.feed(10.0, true);
+  EXPECT_FALSE(wd.expired(10.4));
+  EXPECT_TRUE(wd.expired(10.6));
+  EXPECT_FALSE(wd.expired(11.0)) << "must fire only once";
+}
+
+TEST(CommandWatchdog, FreshCommandsKeepItQuiet)
+{
+  CommandWatchdog wd(0.5);
+  for (double t = 0.0; t < 5.0; t += 0.1) {
+    wd.feed(t, true);
+    EXPECT_FALSE(wd.expired(t + 0.05));
+  }
+}
+
+TEST(CommandWatchdog, ZeroCommandDisarms)
+{
+  CommandWatchdog wd(0.5);
+  wd.feed(0.0, true);
+  wd.feed(0.1, false);     // robot was told to stop: nothing to enforce
+  EXPECT_FALSE(wd.expired(5.0));
+  wd.feed(6.0, true);      // re-armed by the next motion command
+  EXPECT_TRUE(wd.expired(6.6));
+}
+
+TEST(CommandWatchdog, DisabledWithZeroTimeout)
+{
+  CommandWatchdog wd(0.0);
+  wd.feed(0.0, true);
+  EXPECT_FALSE(wd.expired(100.0));
+}

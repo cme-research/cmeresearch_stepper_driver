@@ -1,0 +1,63 @@
+# Stepper driver parameters of the CMEXAIII robot (mecanum, 4 wheels).
+# Mirrors cmeresearch_bringup/launch/cmexaiii_hardware.launch.py; node names
+# match the ones used there. Load with
+#   ros2 run cmeresearch_stepper_driver stepper_driver_node \
+#     --ros-args -r __node:=stepper_driver_left_stepper \
+#     --params-file $(ros2 pkg prefix --share cmeresearch_stepper_driver)/config/cmexaiii.yaml
+#
+# steps_per_revolution, step_resolution, gear_ratio and max_step_vel must match
+# the cmexa_base hardware parameters in cmeresearch_description
+# (urdf/cmexaiii/robot_properties.urdf.xacro), see README "Must match cmexa_base".
+
+/**:
+  ros__parameters:
+    bricklet_host: localhost
+    bricklet_port: 4223
+    step_resolution: 8
+    interpolation: true
+    acceleration: 10000
+    deceleration: 10000
+    steps_per_revolution: 200
+    gear_ratio: 5.0
+    max_step_vel: 8000
+    hw_simulation: false
+    command_timeout: 0.5
+    feedback_timeout: 0.5
+    connect_retry_ms: 1000
+    # Freewheel at standstill: standstill_current 0 only takes effect with
+    # freewheel_mode 1 on the SilentStepper V2.
+    standstill_current: 0
+    freewheel_mode: 1
+    motor_run_current: 800
+    standstill_delay_time: 300
+    power_down_time: 1000
+    stealth_threshold: 4000
+    coolstep_threshold: 6000
+    classic_threshold: 10000
+    high_velocity_chopper_mode: false
+    under_voltage_mv: 17000
+    under_voltage_hysteresis_mv: 500
+
+stepper_driver_left_stepper:
+  ros__parameters:
+    brick_position: a
+    mirror_direction: false
+    wheel_name: front_left_wheel
+
+stepper_driver_right_stepper:
+  ros__parameters:
+    brick_position: b
+    mirror_direction: true
+    wheel_name: front_right_wheel
+
+stepper_driver_rear_left_stepper:
+  ros__parameters:
+    brick_position: c
+    mirror_direction: false
+    wheel_name: rear_left_wheel
+
+stepper_driver_rear_right_stepper:
+  ros__parameters:
+    brick_position: d
+    mirror_direction: true
+    wheel_name: rear_right_wheel

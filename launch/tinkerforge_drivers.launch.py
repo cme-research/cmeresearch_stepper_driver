@@ -31,6 +31,9 @@ def generate_launch_description():
                 'max_step_vel': 5000,
                 'wheel_name': 'front_right',
                 'hw_simulation': False,
+                'command_timeout': 0.5,   # stop if commands stop arriving [s]
+                'feedback_timeout': 0.5,  # bricklet data older than this = lost [s]
+                'connect_retry_ms': 1000,  # retry while brickd is not up yet
                 'standstill_current': 200,
                 'motor_run_current': 800,
                 'standstill_delay_time': 300,

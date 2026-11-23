@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef CMERESEARCH_STEPPER_DRIVER__STEPPER_DRIVER_ROS_WRAPPER_HPP_
 #define CMERESEARCH_STEPPER_DRIVER__STEPPER_DRIVER_ROS_WRAPPER_HPP_
 
+#include <chrono>
 #include <memory>
 #include <string>
 
@@ -26,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "cmeresearch_msgs/msg/tinker_stepper_command.hpp"
 #include "cmeresearch_msgs/msg/tinker_stepper_feedback.hpp"
+#include "cmeresearch_stepper_driver/stepper_math.hpp"
 #include "cmeresearch_stepper_driver/tinkerforge_bricklet_stepper_driver.hpp"
 
 namespace cmeresearch_stepper_driver
@@ -34,8 +36,8 @@ namespace cmeresearch_stepper_driver
 /// ROS interface for one wheel:
 ///  - subscribes  drive_input  (TinkerStepperCommand, wheel rad/s)
 ///  - publishes   drive_output (TinkerStepperFeedback, every 100 ms)
-///  - publishes   state        (std_msgs/String, latched): initialized | error |
-///                             low_voltage | idle
+///  - publishes   state        (std_msgs/String, latched, on change):
+///      connecting | initialized | low_voltage | idle | disconnected | error
 ///
 /// Feedback velocity is signed microsteps/s on the motor shaft, expressed in
 /// the joint (command) direction convention, i.e. mirror_direction undone.
@@ -44,13 +46,17 @@ class SilentStepperDriverWrapper
 public:
   explicit SilentStepperDriverWrapper(rclcpp::Node::SharedPtr node);
 
-  /// Read parameters, set up ROS interfaces and connect to the hardware.
+  /// Read and validate parameters, set up ROS interfaces and start connecting
+  /// to the hardware in the background. Returns false only for an invalid
+  /// configuration; a missing brickd is retried, not fatal.
   bool initialize();
 
 private:
   void drive_callback(const cmeresearch_msgs::msg::TinkerStepperCommand::SharedPtr msg);
   void timer_callback();
+  void update_state(bool under_voltage);
   void publish_state(const std::string & state);
+  double now_s() const;
 
   rclcpp::Node::SharedPtr node_;
   rclcpp::Subscription<cmeresearch_msgs::msg::TinkerStepperCommand>::SharedPtr sub_drive_cmd_;
@@ -60,15 +66,21 @@ private:
 
   StepperConfig config_;
   std::unique_ptr<StepperDriver> driver_;
+  CommandWatchdog watchdog_{0.5};
 
   std::string wheel_name_;
   double gear_ratio_ = 1.0;
   bool mirror_direction_ = false;
   bool hw_simulation_ = false;
 
-  /// hw_simulation only: last commanded velocity [signed microsteps/s, joint frame].
+  std::string state_;          // last published state
+  bool was_ready_ = false;     // reached "initialized" at least once
+
+  /// hw_simulation only: commanded velocity [signed microsteps/s, joint frame]
+  /// and the position integrated from it [microsteps].
   int32_t sim_velocity_ = 0;
-  bool prev_low_voltage_ = false;
+  double sim_position_ = 0.0;
+  double last_tick_s_ = 0.0;
 };
 
 }  // namespace cmeresearch_stepper_driver

@@ -18,10 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "cmeresearch_stepper_driver/tinkerforge_bricklet_stepper_driver.hpp"
 
 #include <cctype>
-#include <chrono>
 #include <cstdio>
 #include <stdexcept>
-#include <thread>
 #include <utility>
 
 #include "cmeresearch_stepper_driver/stepper_math.hpp"
@@ -32,72 +30,86 @@ namespace cmeresearch_stepper_driver
 namespace
 {
 
-uint8_t require_step_resolution(int microsteps)
+const StepperConfig & require_valid(const StepperConfig & config)
 {
-  const auto reg = step_resolution_to_register(microsteps);
-  if (!reg) {
-    throw std::invalid_argument(
-            "step_resolution must be one of 1, 2, 4, 8, 16, 32, 64, 128, 256 (got " +
-            std::to_string(microsteps) + ")");
+  const auto check = validate(config);
+  if (!check.ok()) {
+    std::string msg = "invalid stepper configuration:";
+    for (const auto & e : check.errors) {
+      msg += "\n  - " + e;
+    }
+    throw std::invalid_argument(msg);
   }
-  return *reg;
+  return config;
 }
 
-// Callback signatures differ per callback id; the binding takes a generic
-// function pointer and casts it back internally.
-template<typename Fn>
-void (* as_callback(Fn * fn))(void)
-{
-  return reinterpret_cast<void (*)(void)>(fn);
-}
+char lower(char c) {return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));}
 
 }  // namespace
 
-StepperDriver::StepperDriver(StepperConfig config, LogFn log)
-: config_(std::move(config)),
-  step_resolution_register_(require_step_resolution(config_.microsteps)),
-  log_(std::move(log))
+const char * to_string(DriverStatus status)
 {
-  const char pos = static_cast<char>(std::tolower(static_cast<unsigned char>(config_.brick_position)));
-  if (pos < 'a' || pos > 'h') {
-    throw std::invalid_argument(
-            std::string("brick_position must be a bricklet port letter a..h (got '") +
-            config_.brick_position + "')");
+  switch (status) {
+    case DriverStatus::Connecting: return "connecting";
+    case DriverStatus::WaitingForBricklet: return "waiting_for_bricklet";
+    case DriverStatus::Ready: return "ready";
+    case DriverStatus::Stale: return "stale";
+    case DriverStatus::Error: return "error";
   }
-  if (config_.freewheel_mode < 0 || config_.freewheel_mode > 3) {
-    throw std::invalid_argument("freewheel_mode must be in [0, 3]");
-  }
+  return "unknown";
+}
 
-  ipcon_create(&ipcon_);
-  // Register before connecting so the initial CONNECTED event (which triggers
-  // enumeration) cannot be missed.
-  ipcon_register_callback(&ipcon_, IPCON_CALLBACK_CONNECTED, as_callback(&cb_connected), this);
-  ipcon_register_callback(&ipcon_, IPCON_CALLBACK_ENUMERATE, as_callback(&cb_enumerate), this);
+StepperDriver::StepperDriver(
+  StepperConfig config, std::unique_ptr<BrickletIo> io, LogFn log, NowFn now)
+: config_(require_valid(config)),
+  step_resolution_register_(*step_resolution_to_register(config_.microsteps)),
+  io_(std::move(io)),
+  log_(std::move(log)),
+  now_(std::move(now))
+{
+  BrickletCallbacks cb;
+  cb.on_connected = [this](bool auto_reconnect) {handle_connected(auto_reconnect);};
+  cb.on_disconnected = [this]() {handle_disconnected();};
+  cb.on_enumerate = [this](const EnumerateInfo & info) {handle_enumerate(info);};
+  cb.on_all_data = [this](uint16_t v, int32_t p, int32_t r, uint16_t u, uint16_t i) {
+      handle_all_data(v, p, r, u, i);
+    };
+  cb.on_new_state = [this](uint8_t s, uint8_t prev) {handle_new_state(s, prev);};
+  // Registered before connecting so the initial CONNECTED event (which
+  // triggers enumeration) cannot be missed.
+  io_->set_callbacks(std::move(cb));
 }
 
 StepperDriver::~StepperDriver()
 {
   {
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    stopping_ = true;
+  }
+  stop_cv_.notify_all();
+  if (connect_thread_.joinable()) {
+    connect_thread_.join();
+  }
+
+  {
     std::lock_guard<std::mutex> lock(device_mutex_);
     if (configured_.load() && device_created_) {
       log(LogLevel::Info, "Shutting down stepper: stop and disable driver stage");
-      silent_stepper_v2_stop(&device_);
+      io_->stop();
       // Give the ramp a moment before cutting the driver stage.
-      std::this_thread::sleep_for(std::chrono::milliseconds(400));
-      silent_stepper_v2_set_enabled(&device_, false);
+      std::this_thread::sleep_for(std::chrono::milliseconds(config_.shutdown_ramp_ms));
+      io_->set_enabled(false);
     }
     configured_.store(false);
   }
 
-  // Disconnect stops the binding's threads, so no callback can run below.
-  // Must not hold device_mutex_ here: a callback may be waiting on it.
-  ipcon_disconnect(&ipcon_);
-
+  // Stops the bindings' threads, so no handler runs below. Must not hold
+  // device_mutex_ here: a callback may be waiting on it.
+  io_->disconnect();
   if (device_created_) {
-    silent_stepper_v2_destroy(&device_);
+    io_->destroy_device();
     device_created_ = false;
   }
-  ipcon_destroy(&ipcon_);
 }
 
 void StepperDriver::log(LogLevel level, const std::string & msg) const
@@ -110,105 +122,139 @@ void StepperDriver::log(LogLevel level, const std::string & msg) const
   std::fprintf(stderr, "[%s] StepperDriver: %s\n", names[static_cast<int>(level)], msg.c_str());
 }
 
-int StepperDriver::connect()
+void StepperDriver::start()
 {
-  const int e_code = ipcon_connect(&ipcon_, config_.host.c_str(), static_cast<uint16_t>(config_.port));
-  if (e_code != E_OK) {
-    log(
-      LogLevel::Error, "Connecting to brickd at " + config_.host + ":" +
-      std::to_string(config_.port) + " failed (error " + std::to_string(e_code) + ")");
-    return e_code;
+  if (!connect_thread_.joinable()) {
+    connect_thread_ = std::thread([this]() {connect_loop();});
   }
-  // Keep reconnecting if brickd restarts; cb_connected re-enumerates and the
-  // bricklet is re-configured from cb_enumerate.
-  ipcon_set_auto_reconnect(&ipcon_, true);
-  log(LogLevel::Info, "Connected to brickd at " + config_.host + ":" + std::to_string(config_.port));
-  return E_OK;
 }
 
-void StepperDriver::cb_connected(uint8_t reason, void * user_data)
+void StepperDriver::connect_loop()
 {
-  auto * self = static_cast<StepperDriver *>(user_data);
-  self->log(
-    LogLevel::Info, reason == IPCON_CONNECT_REASON_AUTO_RECONNECT ?
-    "Reconnected to brickd, enumerating" : "Connected, enumerating");
-  ipcon_enumerate(&self->ipcon_);
+  const std::string where = config_.host + ":" + std::to_string(config_.port);
+  for (int attempt = 1;; ++attempt) {
+    {
+      std::lock_guard<std::mutex> lock(stop_mutex_);
+      if (stopping_) {
+        return;
+      }
+    }
+    const int e_code = io_->connect(config_.host, static_cast<uint16_t>(config_.port));
+    if (e_code == 0) {
+      // From now on the bindings reconnect on their own after a connection loss.
+      io_->set_auto_reconnect(true);
+      connected_.store(true);
+      log(LogLevel::Info, "Connected to brickd at " + where);
+      return;
+    }
+    // Log the first failure and then every 10th, so a missing brickd does not
+    // flood the log but stays visible.
+    if (attempt == 1 || attempt % 10 == 0) {
+      log(
+        LogLevel::Warn, "brickd at " + where + " not reachable (error " +
+        std::to_string(e_code) + "), retrying every " +
+        std::to_string(config_.connect_retry_ms) + " ms (attempt " + std::to_string(attempt) + ")");
+    }
+    std::unique_lock<std::mutex> lock(stop_mutex_);
+    stop_cv_.wait_for(
+      lock, std::chrono::milliseconds(config_.connect_retry_ms), [this]() {return stopping_;});
+  }
 }
 
-void StepperDriver::cb_enumerate(
-  const char * uid, const char * /*connected_uid*/, char position,
-  uint8_t /*hardware_version*/[3], uint8_t firmware_version[3],
-  uint16_t device_identifier, uint8_t enumeration_type, void * user_data)
+DriverStatus StepperDriver::status() const
 {
-  auto * self = static_cast<StepperDriver *>(user_data);
-  if (device_identifier != SILENT_STEPPER_V2_DEVICE_IDENTIFIER) {
-    return;
+  if (config_error_.load()) {
+    return DriverStatus::Error;
   }
-  const auto lower = [](char c) {return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));};
-  if (lower(position) != lower(self->config_.brick_position)) {
+  if (!connected_.load()) {
+    return DriverStatus::Connecting;
+  }
+  if (!configured_.load()) {
+    return DriverStatus::WaitingForBricklet;
+  }
+  return is_stale() ? DriverStatus::Stale : DriverStatus::Ready;
+}
+
+bool StepperDriver::is_stale() const
+{
+  std::lock_guard<std::mutex> lock(feedback_mutex_);
+  const auto age = std::chrono::duration<double>(now_() - last_data_).count();
+  return age > config_.feedback_timeout_s;
+}
+
+void StepperDriver::handle_connected(bool auto_reconnect)
+{
+  connected_.store(true);
+  log(LogLevel::Info, auto_reconnect ? "Reconnected to brickd, enumerating" :
+    "Connected, enumerating");
+  io_->enumerate();
+}
+
+void StepperDriver::handle_disconnected()
+{
+  connected_.store(false);
+  configured_.store(false);
+  log(LogLevel::Warn, "Connection to brickd lost, waiting for reconnect");
+}
+
+void StepperDriver::handle_enumerate(const EnumerateInfo & info)
+{
+  if (!info.is_silent_stepper_v2 || lower(info.position) != lower(config_.brick_position)) {
     return;
   }
 
-  std::lock_guard<std::mutex> lock(self->device_mutex_);
+  std::lock_guard<std::mutex> lock(device_mutex_);
 
-  if (enumeration_type == IPCON_ENUMERATION_TYPE_DISCONNECTED) {
-    if (self->device_uid_ == uid) {
-      self->configured_.store(false);
-      self->log(LogLevel::Warn, std::string("Bricklet ") + uid + " disconnected");
+  if (info.type == EnumerateInfo::Type::Disconnected) {
+    if (device_uid_ == info.uid) {
+      configured_.store(false);
+      log(LogLevel::Warn, "Bricklet " + info.uid + " disconnected");
     }
     return;
   }
 
-  self->log(
-    LogLevel::Info, std::string("Found SilentStepper V2 ") + uid + " at port " + position +
-    " (firmware " + std::to_string(firmware_version[0]) + "." +
-    std::to_string(firmware_version[1]) + "." + std::to_string(firmware_version[2]) + ")");
+  log(
+    LogLevel::Info, "Found SilentStepper V2 " + info.uid + " at port " + info.position +
+    " (firmware " + std::to_string(info.firmware[0]) + "." + std::to_string(info.firmware[1]) +
+    "." + std::to_string(info.firmware[2]) + ")");
   // AVAILABLE (answer to our enumerate) and CONNECTED (bricklet was reset or
   // re-plugged, which also wipes its configuration) both need a full configure.
-  self->configure_device_locked(uid);
+  configure_device_locked(info.uid);
 }
 
-void StepperDriver::configure_device_locked(const char * uid)
+void StepperDriver::configure_device_locked(const std::string & uid)
 {
   if (device_created_ && device_uid_ != uid) {
-    silent_stepper_v2_destroy(&device_);
+    io_->destroy_device();
     device_created_ = false;
   }
   if (!device_created_) {
-    silent_stepper_v2_create(&device_, uid, &ipcon_);
+    io_->create_device(uid);
     device_created_ = true;
     device_uid_ = uid;
-    silent_stepper_v2_register_callback(
-      &device_, SILENT_STEPPER_V2_CALLBACK_ALL_DATA, as_callback(&cb_all_data), this);
-    silent_stepper_v2_register_callback(
-      &device_, SILENT_STEPPER_V2_CALLBACK_NEW_STATE, as_callback(&cb_new_state), this);
   }
 
-  const auto & c = config_;
-  silent_stepper_v2_set_step_configuration(&device_, step_resolution_register_, c.interpolation);
-  silent_stepper_v2_set_motor_current(&device_, c.motor_run_current);
-  silent_stepper_v2_set_max_velocity(&device_, 0);
-  silent_stepper_v2_set_speed_ramping(&device_, c.acceleration, c.deceleration);
-  silent_stepper_v2_set_basic_configuration(
-    &device_, c.standstill_current, c.motor_run_current, c.standstill_delay_time,
-    c.power_down_time, c.stealth_threshold, c.coolstep_threshold, c.classic_threshold,
-    c.high_velocity_chopper_mode);
-  // Only freewheel_mode deviates from the firmware defaults (stealth on,
-  // amplitude 128, gradient 4, autoscale on, force_symmetric off). It governs
-  // the standstill behaviour when standstill_current == 0.
-  silent_stepper_v2_set_stealth_configuration(
-    &device_, true, 128, 4, true, false, static_cast<uint8_t>(c.freewheel_mode));
-  silent_stepper_v2_set_all_callback_configuration(&device_, 100);
-  silent_stepper_v2_set_enabled(&device_, true);
+  configured_.store(false);
+  const int e_code = io_->configure(config_, step_resolution_register_);
+  if (e_code != 0) {
+    config_error_.store(true);
+    log(
+      LogLevel::Error, "Bricklet " + uid + " rejected the configuration (error " +
+      std::to_string(e_code) + "); it will be retried on the next reconnect");
+    return;
+  }
+  config_error_.store(false);
 
-  // Force a disable/enable cycle on the next drive command, as before.
+  // Force a disable/enable cycle on the next drive command.
   enabled_ = false;
   {
     std::lock_guard<std::mutex> fb_lock(feedback_mutex_);
     have_position_ = false;
+    // Give the data stream a full timeout to start.
+    last_data_ = now_();
   }
   configured_.store(true);
-  log(LogLevel::Info, "Bricklet configured (" + std::to_string(c.microsteps) + " microsteps)");
+  log(LogLevel::Info, "Bricklet configured (" + std::to_string(config_.microsteps) + " microsteps)");
 }
 
 void StepperDriver::ensure_enabled_locked()
@@ -218,8 +264,8 @@ void StepperDriver::ensure_enabled_locked()
     if (rearm) {
       log(LogLevel::Info, "Re-arming driver stage after under-voltage recovery");
     }
-    silent_stepper_v2_set_enabled(&device_, false);
-    silent_stepper_v2_set_enabled(&device_, true);
+    io_->set_enabled(false);
+    io_->set_enabled(true);
     enabled_ = true;
   }
 }
@@ -236,86 +282,82 @@ void StepperDriver::command_velocity(double motor_rad_s)
   if (steps_per_s == 0) {
     // Ramp down in the current direction; issuing a direction call here would
     // make the bricklet run a pointless direction-change sequence.
-    silent_stepper_v2_set_max_velocity(&device_, 0);
+    io_->set_max_velocity(0);
     return;
   }
 
   ensure_enabled_locked();
   const int direction = motor_rad_s > 0.0 ? 1 : -1;
-  if (direction > 0) {
-    silent_stepper_v2_drive_forward(&device_);
-  } else {
-    silent_stepper_v2_drive_backward(&device_);
-  }
+  io_->drive(direction);
   commanded_direction_.store(direction);
-  silent_stepper_v2_set_max_velocity(&device_, steps_per_s);
+  io_->set_max_velocity(steps_per_s);
 }
 
 void StepperDriver::stop()
 {
   std::lock_guard<std::mutex> lock(device_mutex_);
   if (configured_.load()) {
-    silent_stepper_v2_stop(&device_);
+    io_->stop();
   }
 }
 
 StepperFeedback StepperDriver::feedback() const
 {
-  if (!configured_.load()) {
-    return StepperFeedback{};
-  }
+  const bool live = status() == DriverStatus::Ready;
   std::lock_guard<std::mutex> lock(feedback_mutex_);
-  return feedback_;
+  StepperFeedback fb = feedback_;
+  fb.valid = live;
+  if (!live) {
+    // Never hand out a frozen velocity: odometry would keep integrating it.
+    fb.velocity = 0;
+  }
+  return fb;
 }
 
-void StepperDriver::cb_all_data(
-  uint16_t current_velocity, int32_t current_position, int32_t remaining_steps,
-  uint16_t input_voltage, uint16_t current_consumption, void * user_data)
+void StepperDriver::handle_all_data(
+  uint16_t velocity, int32_t position, int32_t remaining_steps,
+  uint16_t input_voltage_mv, uint16_t current_consumption_ma)
 {
-  auto * self = static_cast<StepperDriver *>(user_data);
   bool recovered = false;
   bool tripped = false;
   {
-    std::lock_guard<std::mutex> lock(self->feedback_mutex_);
-    auto & fb = self->feedback_;
+    std::lock_guard<std::mutex> lock(feedback_mutex_);
+    auto & fb = feedback_;
+    last_data_ = now_();
 
-    const int fallback = self->commanded_direction_.load();
-    const int direction = self->have_position_ ?
-      direction_from_position_delta(fb.position, current_position, fallback) : fallback;
-    self->have_position_ = true;
+    const int fallback = commanded_direction_.load();
+    const int direction = have_position_ ?
+      direction_from_position_delta(fb.position, position, fallback) : fallback;
+    have_position_ = true;
 
-    fb.velocity = direction * static_cast<int32_t>(current_velocity);
-    fb.position = current_position;
+    fb.velocity = direction * static_cast<int32_t>(velocity);
+    fb.position = position;
     fb.remaining_steps = remaining_steps;
-    fb.input_voltage_mv = input_voltage;
-    fb.current_consumption_ma = current_consumption;
+    fb.input_voltage_mv = input_voltage_mv;
+    fb.current_consumption_ma = current_consumption_ma;
 
     const bool was_low = fb.under_voltage;
     fb.under_voltage = update_under_voltage(
-      was_low, input_voltage, self->config_.under_voltage_mv,
-      self->config_.under_voltage_hysteresis_mv);
+      was_low, input_voltage_mv, config_.under_voltage_mv, config_.under_voltage_hysteresis_mv);
     tripped = !was_low && fb.under_voltage;
     recovered = was_low && !fb.under_voltage;
   }
 
   if (tripped) {
-    self->log(LogLevel::Warn, "Input voltage low: " + std::to_string(input_voltage) + " mV");
+    log(LogLevel::Warn, "Input voltage low: " + std::to_string(input_voltage_mv) + " mV");
   }
   if (recovered) {
-    self->log(LogLevel::Info, "Input voltage recovered: " + std::to_string(input_voltage) + " mV");
-    // Two independent consumers: the command path re-arms the driver stage,
-    // the ROS wrapper publishes the state change.
-    self->rearm_pending_.store(true);
-    self->voltage_recovered_event_.store(true);
+    log(LogLevel::Info, "Input voltage recovered: " + std::to_string(input_voltage_mv) + " mV");
+    // The command path re-arms the driver stage on the next drive command.
+    rearm_pending_.store(true);
   }
 }
 
-void StepperDriver::cb_new_state(uint8_t state_new, uint8_t state_previous, void * user_data)
+void StepperDriver::handle_new_state(uint8_t state_new, uint8_t state_previous)
 {
-  auto * self = static_cast<StepperDriver *>(user_data);
-  std::lock_guard<std::mutex> lock(self->feedback_mutex_);
-  self->feedback_.state = state_new;
-  self->feedback_.previous_state = state_previous;
+  std::lock_guard<std::mutex> lock(feedback_mutex_);
+  feedback_.state = state_new;
+  feedback_.previous_state = state_previous;
 }
 
 }  // namespace cmeresearch_stepper_driver
